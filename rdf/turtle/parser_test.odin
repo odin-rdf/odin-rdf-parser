@@ -351,6 +351,163 @@ test_nested_collection :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_triple_terms :: proc(t: ^testing.T) {
+	src := EX_PRE + "ex:s ex:p <<( ex:a ex:b \"x\" )>> .\n"
+	p: Parser
+	parser_init(&p, transmute([]byte)src)
+	defer parser_destroy(&p)
+
+	tt := rdf.Triple {
+		subject   = ex("a"),
+		predicate = ex("b"),
+		object    = rdf.literal_plain("x"),
+	}
+	next_expect(t, &p, ex("s"), ex("p"), &tt)
+	expect_end(t, &p)
+}
+
+@(test)
+test_nested_triple_terms :: proc(t: ^testing.T) {
+	src := EX_PRE + "ex:s ex:p <<( ex:a ex:b <<( ex:c a ex:E )>> )>> .\n"
+	p: Parser
+	parser_init(&p, transmute([]byte)src)
+	defer parser_destroy(&p)
+
+	inner := rdf.Triple{subject = ex("c"), predicate = rdf.RDF_TYPE, object = ex("E")}
+	outer := rdf.Triple{subject = ex("a"), predicate = ex("b"), object = &inner}
+	next_expect(t, &p, ex("s"), ex("p"), &outer)
+	expect_end(t, &p)
+}
+
+@(test)
+test_reified_triples :: proc(t: ^testing.T) {
+	src := EX_PRE +
+		"<< ex:a ex:b ex:c >> .\n" +
+		"<< ex:a ex:b ex:c ~ ex:r >> ex:p ex:o .\n" +
+		"ex:s ex:q << ex:d ex:e ex:f >> .\n"
+	p: Parser
+	parser_init(&p, transmute([]byte)src)
+	defer parser_destroy(&p)
+
+	b := proc(n: string) -> rdf.Term { return rdf.Blank_Node(n) }
+	tt1 := rdf.Triple{subject = ex("a"), predicate = ex("b"), object = ex("c")}
+	next_expect(t, &p, b("b0"), rdf.RDF_REIFIES, &tt1)
+	next_expect(t, &p, ex("r"), rdf.RDF_REIFIES, &tt1)
+	next_expect(t, &p, ex("r"), ex("p"), ex("o"))
+	tt2 := rdf.Triple{subject = ex("d"), predicate = ex("e"), object = ex("f")}
+	next_expect(t, &p, b("b1"), rdf.RDF_REIFIES, &tt2)
+	next_expect(t, &p, ex("s"), ex("q"), b("b1"))
+	expect_end(t, &p)
+}
+
+@(test)
+test_nested_reified_subject :: proc(t: ^testing.T) {
+	// The inner reified triple denotes its reifier, which becomes the
+	// subject inside the outer triple term.
+	src := EX_PRE + "<< << ex:a ex:b ex:c >> ex:d ex:e >> ex:p ex:o .\n"
+	p: Parser
+	parser_init(&p, transmute([]byte)src)
+	defer parser_destroy(&p)
+
+	b := proc(n: string) -> rdf.Term { return rdf.Blank_Node(n) }
+	inner_tt := rdf.Triple{subject = ex("a"), predicate = ex("b"), object = ex("c")}
+	next_expect(t, &p, b("b0"), rdf.RDF_REIFIES, &inner_tt)
+	outer_tt := rdf.Triple{subject = b("b0"), predicate = ex("d"), object = ex("e")}
+	next_expect(t, &p, b("b1"), rdf.RDF_REIFIES, &outer_tt)
+	next_expect(t, &p, b("b1"), ex("p"), ex("o"))
+	expect_end(t, &p)
+}
+
+@(test)
+test_reifier_syntax :: proc(t: ^testing.T) {
+	src := EX_PRE +
+		"ex:s ex:p ex:o ~ ex:r .\n" +
+		"ex:s ex:p ex:o2 ~ .\n" +
+		"ex:s ex:p ex:o3 ~ ex:r1 ~ ex:r2 .\n"
+	p: Parser
+	parser_init(&p, transmute([]byte)src)
+	defer parser_destroy(&p)
+
+	b := proc(n: string) -> rdf.Term { return rdf.Blank_Node(n) }
+	tt1 := rdf.Triple{subject = ex("s"), predicate = ex("p"), object = ex("o")}
+	next_expect(t, &p, ex("s"), ex("p"), ex("o"))
+	next_expect(t, &p, ex("r"), rdf.RDF_REIFIES, &tt1)
+	tt2 := rdf.Triple{subject = ex("s"), predicate = ex("p"), object = ex("o2")}
+	next_expect(t, &p, ex("s"), ex("p"), ex("o2"))
+	next_expect(t, &p, b("b0"), rdf.RDF_REIFIES, &tt2)
+	tt3 := rdf.Triple{subject = ex("s"), predicate = ex("p"), object = ex("o3")}
+	next_expect(t, &p, ex("s"), ex("p"), ex("o3"))
+	next_expect(t, &p, ex("r1"), rdf.RDF_REIFIES, &tt3)
+	next_expect(t, &p, ex("r2"), rdf.RDF_REIFIES, &tt3)
+	expect_end(t, &p)
+}
+
+@(test)
+test_annotation_blocks :: proc(t: ^testing.T) {
+	src := EX_PRE +
+		"ex:s ex:p ex:o {| ex:q ex:v |} .\n" +
+		"ex:s ex:p ex:o2 ~ ex:r {| ex:q ex:v |} .\n" +
+		"ex:s ex:p ex:o3 {| ex:a ex:b |} {| ex:c ex:d |} .\n"
+	p: Parser
+	parser_init(&p, transmute([]byte)src)
+	defer parser_destroy(&p)
+
+	b := proc(n: string) -> rdf.Term { return rdf.Blank_Node(n) }
+	tt1 := rdf.Triple{subject = ex("s"), predicate = ex("p"), object = ex("o")}
+	next_expect(t, &p, ex("s"), ex("p"), ex("o"))
+	next_expect(t, &p, b("b0"), rdf.RDF_REIFIES, &tt1)
+	next_expect(t, &p, b("b0"), ex("q"), ex("v"))
+
+	// An explicit reifier is consumed by the following block.
+	tt2 := rdf.Triple{subject = ex("s"), predicate = ex("p"), object = ex("o2")}
+	next_expect(t, &p, ex("s"), ex("p"), ex("o2"))
+	next_expect(t, &p, ex("r"), rdf.RDF_REIFIES, &tt2)
+	next_expect(t, &p, ex("r"), ex("q"), ex("v"))
+
+	// Consecutive bare blocks each reify independently.
+	tt3 := rdf.Triple{subject = ex("s"), predicate = ex("p"), object = ex("o3")}
+	next_expect(t, &p, ex("s"), ex("p"), ex("o3"))
+	next_expect(t, &p, b("b1"), rdf.RDF_REIFIES, &tt3)
+	next_expect(t, &p, b("b1"), ex("a"), ex("b"))
+	next_expect(t, &p, b("b2"), rdf.RDF_REIFIES, &tt3)
+	next_expect(t, &p, b("b2"), ex("c"), ex("d"))
+	expect_end(t, &p)
+}
+
+@(test)
+test_annotation_on_object_list :: proc(t: ^testing.T) {
+	src := EX_PRE + "ex:s ex:p ex:o1 ~ ex:r1 , ex:o2 {| ex:q ex:v |} .\n"
+	p: Parser
+	parser_init(&p, transmute([]byte)src)
+	defer parser_destroy(&p)
+
+	b := proc(n: string) -> rdf.Term { return rdf.Blank_Node(n) }
+	tt1 := rdf.Triple{subject = ex("s"), predicate = ex("p"), object = ex("o1")}
+	tt2 := rdf.Triple{subject = ex("s"), predicate = ex("p"), object = ex("o2")}
+	next_expect(t, &p, ex("s"), ex("p"), ex("o1"))
+	next_expect(t, &p, ex("r1"), rdf.RDF_REIFIES, &tt1)
+	next_expect(t, &p, ex("s"), ex("p"), ex("o2"))
+	next_expect(t, &p, b("b0"), rdf.RDF_REIFIES, &tt2)
+	next_expect(t, &p, b("b0"), ex("q"), ex("v"))
+	expect_end(t, &p)
+}
+
+@(test)
+test_star_errors :: proc(t: ^testing.T) {
+	// Triple terms are object-position only.
+	expect_error(t, EX_PRE + "<<( ex:a ex:b ex:c )>> ex:p ex:o .", .Expected_Subject)
+	// Literal subjects are invalid inside both embedded forms.
+	expect_error(t, EX_PRE + "ex:s ex:p <<( \"lit\" ex:b ex:c )>> .", .Expected_Subject)
+	expect_error(t, EX_PRE + "ex:s ex:p << \"lit\" ex:b ex:c >> .", .Expected_Subject)
+	// Unclosed forms.
+	expect_error(t, EX_PRE + "ex:s ex:p <<( ex:a ex:b ex:c >> .", .Unclosed_Triple_Term)
+	expect_error(t, EX_PRE + "ex:s ex:p << ex:a ex:b ex:c .", .Unclosed_Reified_Triple)
+	expect_error(t, EX_PRE + "ex:s ex:p ex:o {| ex:q ex:v .", .Unclosed_Annotation)
+	// A property list is not a valid reifier target.
+	expect_error(t, EX_PRE + "ex:s ex:p ex:o ~ [ ex:q ex:v ] .", .Unclosed_Property_List)
+}
+
+@(test)
 test_deep_nesting_bounded :: proc(t: ^testing.T) {
 	depth := 200
 	b: strings.Builder

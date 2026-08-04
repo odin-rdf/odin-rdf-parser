@@ -37,6 +37,8 @@ Error_Kind :: enum {
 	Unclosed_Property_List,
 	Unclosed_Collection,
 	Nesting_Too_Deep,
+	Unclosed_Reified_Triple,
+	Unclosed_Annotation,
 }
 
 // Error is a grammar violation with its position. The zero value (kind
@@ -112,6 +114,10 @@ error_message :: proc(kind: Error_Kind) -> string {
 		return "collection not closed with ')' (collection)"
 	case .Nesting_Too_Deep:
 		return "nesting exceeds the parser's depth bound (blankNodePropertyList/collection)"
+	case .Unclosed_Reified_Triple:
+		return "reified triple not closed with '>>' (reifiedTriple)"
+	case .Unclosed_Annotation:
+		return "annotation block not closed with '|}' (annotationBlock)"
 	}
 	return "unknown error"
 }

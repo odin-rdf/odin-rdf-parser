@@ -232,6 +232,11 @@ parse_triples :: proc(p: ^Parser, first: Token) -> bool {
 		pol_optional = has_props
 	case .L_Paren:
 		subject, sok = parse_collection(p, first)
+	case .Reified_Open:
+		// 'reifiedTriple predicateObjectList?': the reified triple's own
+		// rdf:reifies assertion makes it a complete statement.
+		subject, sok = parse_reified_triple(p, first)
+		pol_optional = true
 	case:
 		subject, sok = parse_subject(p, first)
 	}
@@ -312,7 +317,8 @@ parse_predicate_object_list :: proc(p: ^Parser, subject: rdf.Term) -> bool {
 	}
 }
 
-// parse_object_list parses 'object (',' object)*'.
+// parse_object_list parses 'object annotation (',' object annotation)*'
+// where annotation is the RDF 1.2 '(reifier | annotationBlock)*'.
 @(private)
 parse_object_list :: proc(p: ^Parser, subject: rdf.Term, verb: rdf.Term) -> bool {
 	for {
@@ -321,6 +327,9 @@ parse_object_list :: proc(p: ^Parser, subject: rdf.Term, verb: rdf.Term) -> bool
 			return false
 		}
 		append(&p.queue, rdf.Triple{subject = subject, predicate = verb, object = object})
+		if !parse_annotation(p, subject, verb, object) {
+			return false
+		}
 		peeked, has := peek_token(p)
 		if !has {
 			return !scanner_failed(p) // EOF; the Dot check reports it
@@ -330,6 +339,340 @@ parse_object_list :: proc(p: ^Parser, subject: rdf.Term, verb: rdf.Term) -> bool
 		}
 		_, _ = next_token(p)
 	}
+}
+
+// parse_annotation handles the RDF 1.2 annotation trailer after an
+// object: '(reifier | annotationBlock)*'.
+//
+//   - '~ R?' asserts 'R rdf:reifies <<( s p o )>>' (fresh blank node
+//     when R is omitted) and makes R the pending reifier.
+//   - '{| pol |}' applies pol to the pending reifier — or, with none
+//     pending, to a fresh blank node that first gets its own
+//     rdf:reifies assertion. A block consumes the pending reifier, so
+//     consecutive bare blocks each reify independently.
+//
+// One triple-term node is shared by every assertion about this object.
+@(private)
+parse_annotation :: proc(p: ^Parser, subject: rdf.Term, verb: rdf.Term, object: rdf.Term) -> bool {
+	tt: rdf.Term // built lazily on the first use
+	pending: rdf.Term
+	for {
+		peeked, has := peek_token(p)
+		if !has {
+			return !scanner_failed(p)
+		}
+		#partial switch peeked.kind {
+		case .Tilde:
+			_, _ = next_token(p)
+			reifier, rok := parse_optional_reifier_target(p)
+			if !rok {
+				return false
+			}
+			if tt == nil {
+				tt = triple_term_node(p, subject, verb, object)
+			}
+			append(&p.queue, rdf.Triple{subject = reifier, predicate = rdf.RDF_REIFIES, object = tt})
+			pending = reifier
+		case .Annotation_Open:
+			open, _ := next_token(p)
+			if !enter_nested(p, open) {
+				return false
+			}
+			target := pending
+			if target == nil {
+				target = fresh_blank_node(p)
+				if tt == nil {
+					tt = triple_term_node(p, subject, verb, object)
+				}
+				append(&p.queue, rdf.Triple{subject = target, predicate = rdf.RDF_REIFIES, object = tt})
+			}
+			pending = nil
+			if !parse_predicate_object_list(p, target) {
+				return false
+			}
+			close, cok := next_token(p)
+			if !cok {
+				if !scanner_failed(p) {
+					fail_here(p, .Unclosed_Annotation)
+				}
+				return false
+			}
+			if close.kind != .Annotation_Close {
+				fail_at(p, .Unclosed_Annotation, close)
+				return false
+			}
+			p.depth -= 1
+		case:
+			return true
+		}
+	}
+}
+
+// parse_optional_reifier_target parses the optional target of '~':
+// an IRI, a blank node label, or ANON; a bare '~' synthesizes one.
+@(private)
+parse_optional_reifier_target :: proc(p: ^Parser) -> (term: rdf.Term, ok: bool) {
+	peeked, has := peek_token(p)
+	if !has {
+		if scanner_failed(p) {
+			return nil, false
+		}
+		return fresh_blank_node(p), true
+	}
+	#partial switch peeked.kind {
+	case .IRI_Ref:
+		_, _ = next_token(p)
+		return iri_ref_term(p, peeked)
+	case .PName:
+		_, _ = next_token(p)
+		return pname_term(p, peeked)
+	case .Blank_Node_Label:
+		_, _ = next_token(p)
+		return doc_blank_node(p, peeked), true
+	case .L_Bracket:
+		open, _ := next_token(p)
+		return parse_anon(p, open)
+	}
+	return fresh_blank_node(p), true
+}
+
+// parse_anon expects the ']' of a bare ANON '[ ]' — property lists are
+// not permitted in this position.
+@(private)
+parse_anon :: proc(p: ^Parser, open: Token) -> (term: rdf.Term, ok: bool) {
+	close, cok := next_token(p)
+	if !cok {
+		if !scanner_failed(p) {
+			fail_here(p, .Unclosed_Property_List)
+		}
+		return nil, false
+	}
+	if close.kind != .R_Bracket {
+		fail_at(p, .Unclosed_Property_List, close)
+		return nil, false
+	}
+	return fresh_blank_node(p), true
+}
+
+// parse_reified_triple parses '<< rtSubject verb rtObject reifier? >>'
+// from its consumed '<<' token. It asserts 'R rdf:reifies <<( s p o )>>'
+// and denotes R (explicit, or a fresh blank node).
+@(private)
+parse_reified_triple :: proc(p: ^Parser, open: Token) -> (term: rdf.Term, ok: bool) {
+	if !enter_nested(p, open) {
+		return nil, false
+	}
+	defer p.depth -= 1
+
+	stok, sok := next_token(p)
+	if !sok {
+		if !scanner_failed(p) {
+			fail_here(p, .Expected_Subject)
+		}
+		return nil, false
+	}
+	subject: rdf.Term
+	subject_ok: bool
+	#partial switch stok.kind {
+	case .IRI_Ref:
+		subject, subject_ok = iri_ref_term(p, stok)
+	case .PName:
+		subject, subject_ok = pname_term(p, stok)
+	case .Blank_Node_Label:
+		subject, subject_ok = doc_blank_node(p, stok), true
+	case .L_Bracket:
+		subject, subject_ok = parse_anon(p, stok)
+	case .Reified_Open:
+		subject, subject_ok = parse_reified_triple(p, stok)
+	case:
+		fail_at(p, .Expected_Subject, stok)
+		return nil, false
+	}
+	if !subject_ok {
+		return nil, false
+	}
+
+	verb, vok := parse_verb(p)
+	if !vok {
+		return nil, false
+	}
+
+	otok, ook := next_token(p)
+	if !ook {
+		if !scanner_failed(p) {
+			fail_here(p, .Expected_Object)
+		}
+		return nil, false
+	}
+	object: rdf.Term
+	object_ok: bool
+	#partial switch otok.kind {
+	case .IRI_Ref:
+		object, object_ok = iri_ref_term(p, otok)
+	case .PName:
+		object, object_ok = pname_term(p, otok)
+	case .Blank_Node_Label:
+		object, object_ok = doc_blank_node(p, otok), true
+	case .L_Bracket:
+		object, object_ok = parse_anon(p, otok)
+	case .String_Literal:
+		object, object_ok = parse_literal(p, otok)
+	case .Integer:
+		object, object_ok = rdf.literal_typed(otok.text, rdf.XSD_INTEGER), true
+	case .Decimal:
+		object, object_ok = rdf.literal_typed(otok.text, rdf.XSD_DECIMAL), true
+	case .Double:
+		object, object_ok = rdf.literal_typed(otok.text, rdf.XSD_DOUBLE), true
+	case .Boolean:
+		object, object_ok = rdf.literal_typed(otok.text, rdf.XSD_BOOLEAN), true
+	case .Triple_Term_Open:
+		object, object_ok = parse_triple_term(p, otok)
+	case .Reified_Open:
+		object, object_ok = parse_reified_triple(p, otok)
+	case:
+		fail_at(p, .Expected_Object, otok)
+		return nil, false
+	}
+	if !object_ok {
+		return nil, false
+	}
+
+	reifier: rdf.Term
+	peeked, has := peek_token(p)
+	if has && peeked.kind == .Tilde {
+		_, _ = next_token(p)
+		rok: bool
+		reifier, rok = parse_optional_reifier_target(p)
+		if !rok {
+			return nil, false
+		}
+	} else if !has && scanner_failed(p) {
+		return nil, false
+	} else {
+		reifier = fresh_blank_node(p)
+	}
+
+	close, cok := next_token(p)
+	if !cok {
+		if !scanner_failed(p) {
+			fail_here(p, .Unclosed_Reified_Triple)
+		}
+		return nil, false
+	}
+	if close.kind != .Reified_Close {
+		fail_at(p, .Unclosed_Reified_Triple, close)
+		return nil, false
+	}
+
+	tt := triple_term_node(p, subject, verb, object)
+	append(&p.queue, rdf.Triple{subject = reifier, predicate = rdf.RDF_REIFIES, object = tt})
+	return reifier, true
+}
+
+// parse_triple_term parses '<<( ttSubject verb ttObject )>>' from its
+// consumed '<<(' token, yielding a triple-term node.
+@(private)
+parse_triple_term :: proc(p: ^Parser, open: Token) -> (term: rdf.Term, ok: bool) {
+	if !enter_nested(p, open) {
+		return nil, false
+	}
+	defer p.depth -= 1
+
+	stok, sok := next_token(p)
+	if !sok {
+		if !scanner_failed(p) {
+			fail_here(p, .Expected_Subject)
+		}
+		return nil, false
+	}
+	subject: rdf.Term
+	subject_ok: bool
+	#partial switch stok.kind {
+	case .IRI_Ref:
+		subject, subject_ok = iri_ref_term(p, stok)
+	case .PName:
+		subject, subject_ok = pname_term(p, stok)
+	case .Blank_Node_Label:
+		subject, subject_ok = doc_blank_node(p, stok), true
+	case .L_Bracket:
+		subject, subject_ok = parse_anon(p, stok)
+	case:
+		fail_at(p, .Expected_Subject, stok)
+		return nil, false
+	}
+	if !subject_ok {
+		return nil, false
+	}
+
+	verb, vok := parse_verb(p)
+	if !vok {
+		return nil, false
+	}
+
+	otok, ook := next_token(p)
+	if !ook {
+		if !scanner_failed(p) {
+			fail_here(p, .Expected_Object)
+		}
+		return nil, false
+	}
+	object: rdf.Term
+	object_ok: bool
+	#partial switch otok.kind {
+	case .IRI_Ref:
+		object, object_ok = iri_ref_term(p, otok)
+	case .PName:
+		object, object_ok = pname_term(p, otok)
+	case .Blank_Node_Label:
+		object, object_ok = doc_blank_node(p, otok), true
+	case .L_Bracket:
+		object, object_ok = parse_anon(p, otok)
+	case .String_Literal:
+		object, object_ok = parse_literal(p, otok)
+	case .Integer:
+		object, object_ok = rdf.literal_typed(otok.text, rdf.XSD_INTEGER), true
+	case .Decimal:
+		object, object_ok = rdf.literal_typed(otok.text, rdf.XSD_DECIMAL), true
+	case .Double:
+		object, object_ok = rdf.literal_typed(otok.text, rdf.XSD_DOUBLE), true
+	case .Boolean:
+		object, object_ok = rdf.literal_typed(otok.text, rdf.XSD_BOOLEAN), true
+	case .Triple_Term_Open:
+		object, object_ok = parse_triple_term(p, otok)
+	case:
+		fail_at(p, .Expected_Object, otok)
+		return nil, false
+	}
+	if !object_ok {
+		return nil, false
+	}
+
+	close, cok := next_token(p)
+	if !cok {
+		if !scanner_failed(p) {
+			fail_here(p, .Unclosed_Triple_Term)
+		}
+		return nil, false
+	}
+	if close.kind != .Triple_Term_Close {
+		fail_at(p, .Unclosed_Triple_Term, close)
+		return nil, false
+	}
+	return triple_term_node(p, subject, verb, object), true
+}
+
+// triple_term_node allocates a per-statement triple-term node (freed
+// with free_statement, matching the line-based parsers).
+@(private)
+triple_term_node :: proc(p: ^Parser, subject: rdf.Term, verb: rdf.Term, object: rdf.Term) -> rdf.Term {
+	node := new(rdf.Triple, p.allocator)
+	node^ = {
+		subject   = subject,
+		predicate = verb,
+		object    = object,
+	}
+	append(&p.nodes, node)
+	return node
 }
 
 // parse_bnode_property_list parses '[ predicateObjectList? ]' from its
@@ -477,6 +820,10 @@ parse_object :: proc(p: ^Parser) -> (term: rdf.Term, ok: bool) {
 		return term_, ok_
 	case .L_Paren:
 		return parse_collection(p, tok)
+	case .Reified_Open:
+		return parse_reified_triple(p, tok)
+	case .Triple_Term_Open:
+		return parse_triple_term(p, tok)
 	}
 	fail_at(p, .Expected_Object, tok)
 	return nil, false
