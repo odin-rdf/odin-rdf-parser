@@ -63,7 +63,7 @@ parse_subject :: proc(p: ^Parser) -> (term: rdf.Term, ok: bool) {
 	}
 	#partial switch tok.kind {
 	case .IRI_Ref:
-		return iri_term(p, tok), true
+		return iri_term(p, tok)
 	case .Blank_Node_Label:
 		return rdf.Blank_Node(tok.text), true
 	}
@@ -83,7 +83,7 @@ parse_predicate :: proc(p: ^Parser) -> (term: rdf.Term, ok: bool) {
 		fail_at(p, .Expected_Predicate, tok)
 		return nil, false
 	}
-	return iri_term(p, tok), true
+	return iri_term(p, tok)
 }
 
 parse_object :: proc(p: ^Parser) -> (term: rdf.Term, ok: bool) {
@@ -113,7 +113,11 @@ parse_optional_graph_label :: proc(p: ^Parser) -> (graph: rdf.Graph_Label, ok: b
 		return nil, true
 	case .IRI_Ref:
 		_, _ = next_token(p)
-		return rdf.IRI(maybe_unescape(p, tok)), true
+		iri, iri_ok := iri_term(p, tok)
+		if !iri_ok {
+			return nil, false
+		}
+		return iri.(rdf.IRI), true
 	case .Blank_Node_Label:
 		_, _ = next_token(p)
 		return rdf.Blank_Node(tok.text), true
@@ -141,7 +145,7 @@ expect_dot :: proc(p: ^Parser) -> bool {
 parse_object_term :: proc(p: ^Parser, tok: scan.Token) -> (term: rdf.Term, ok: bool) {
 	#partial switch tok.kind {
 	case .IRI_Ref:
-		return iri_term(p, tok), true
+		return iri_term(p, tok)
 	case .Blank_Node_Label:
 		return rdf.Blank_Node(tok.text), true
 	case .String_Literal:
@@ -197,10 +201,20 @@ parse_literal :: proc(p: ^Parser, tok: scan.Token) -> (term: rdf.Term, ok: bool)
 			fail_at(p, .Expected_Datatype, dtok)
 			return nil, false
 		}
-		// Built directly, not via rdf.literal_typed: "x"^^rdf:langString is
-		// syntactically legal (though semantically ill-typed), and grammar-
-		// driven construction must not trip the constructor's assert.
-		return rdf.Literal{lexical = lexical, datatype = rdf.IRI(maybe_unescape(p, dtok))}, true
+		dt_term, dt_ok := iri_term(p, dtok)
+		if !dt_ok {
+			return nil, false
+		}
+		dt := dt_term.(rdf.IRI)
+		// RDF 1.2 reserves these datatypes for language-tag syntax
+		// (W3C tests ntriples-langdir-bad-3/-5).
+		if dt == rdf.RDF_LANG_STRING || dt == rdf.RDF_DIR_LANG_STRING {
+			fail_at(p, .Reserved_Datatype, dtok)
+			return nil, false
+		}
+		// Built directly, not via rdf.literal_typed, whose assert guards
+		// against the reserved datatypes already rejected above.
+		return rdf.Literal{lexical = lexical, datatype = dt}, true
 	}
 	return rdf.literal_plain(lexical), true
 }
@@ -217,7 +231,11 @@ parse_triple_term :: proc(p: ^Parser) -> (term: rdf.Term, ok: bool) {
 	subject: rdf.Term
 	#partial switch stok.kind {
 	case .IRI_Ref:
-		subject = iri_term(p, stok)
+		subject_ok: bool
+		subject, subject_ok = iri_term(p, stok)
+		if !subject_ok {
+			return nil, false
+		}
 	case .Blank_Node_Label:
 		subject = rdf.Blank_Node(stok.text)
 	case:
@@ -258,8 +276,38 @@ parse_triple_term :: proc(p: ^Parser) -> (term: rdf.Term, ok: bool) {
 }
 
 @(private)
-iri_term :: proc(p: ^Parser, tok: scan.Token) -> rdf.Term {
-	return rdf.IRI(maybe_unescape(p, tok))
+iri_term :: proc(p: ^Parser, tok: scan.Token) -> (term: rdf.Term, ok: bool) {
+	s := maybe_unescape(p, tok)
+	if !is_absolute_iri(s) {
+		fail_at(p, .Relative_IRI, tok)
+		return nil, false
+	}
+	return rdf.IRI(s), true
+}
+
+// is_absolute_iri checks for a leading scheme ("alpha (alnum|+|-|.)* :"),
+// the same level of validation conforming N-Triples parsers apply — full
+// RFC 3987 validation is out of scope (vision non-goal).
+@(private)
+is_absolute_iri :: proc(s: string) -> bool {
+	if len(s) == 0 {
+		return false
+	}
+	first := s[0]
+	if !(first >= 'a' && first <= 'z' || first >= 'A' && first <= 'Z') {
+		return false
+	}
+	for i in 1 ..< len(s) {
+		switch c := s[i]; c {
+		case ':':
+			return true
+		case 'a' ..= 'z', 'A' ..= 'Z', '0' ..= '9', '+', '-', '.':
+			// still in the scheme
+		case:
+			return false
+		}
+	}
+	return false
 }
 
 // maybe_unescape returns the token text as a borrowed slice when it has

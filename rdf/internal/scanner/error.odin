@@ -20,6 +20,8 @@ Error_Kind :: enum {
 	Expected_Object,
 	Expected_Dot,
 	Expected_Datatype,
+	Relative_IRI,
+	Reserved_Datatype,
 	Invalid_Graph_Label,
 	Unclosed_Triple_Term,
 	Invalid_Direction,
@@ -68,6 +70,10 @@ error_message :: proc(kind: Error_Kind) -> string {
 		return "expected '.' after statement (triple)"
 	case .Expected_Datatype:
 		return "expected IRI after '^^' (literal)"
+	case .Relative_IRI:
+		return "relative IRI; IRIs must be absolute (IRIREF)"
+	case .Reserved_Datatype:
+		return "rdf:langString and rdf:dirLangString require language-tag syntax (literal)"
 	case .Invalid_Graph_Label:
 		return "expected IRI or blank node as graph label (graphLabel)"
 	case .Unclosed_Triple_Term:

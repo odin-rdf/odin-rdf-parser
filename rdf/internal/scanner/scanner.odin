@@ -135,12 +135,15 @@ scanner_next :: proc(s: ^Scanner) -> (tok: Token, ok: bool) {
 	case '@':
 		s.pos += 1
 		content_start := s.pos
-		if s.pos >= len(s.source) || !is_alpha(s.source[s.pos]) {
-			set_error(s, .Invalid_Lang_Tag, start)
-			return {}, false
-		}
+		// BCP47 well-formedness (RDF 1.2): subtags are 1-8 characters,
+		// the primary subtag alphabetic.
+		primary_start := s.pos
 		for s.pos < len(s.source) && is_alpha(s.source[s.pos]) {
 			s.pos += 1
+		}
+		if n := s.pos - primary_start; n == 0 || n > 8 {
+			set_error(s, .Invalid_Lang_Tag, start)
+			return {}, false
 		}
 		subtags: for s.pos < len(s.source) && s.source[s.pos] == '-' {
 			if s.pos + 1 < len(s.source) && s.source[s.pos + 1] == '-' {
@@ -161,7 +164,7 @@ scanner_next :: proc(s: ^Scanner) -> (tok: Token, ok: bool) {
 			for s.pos < len(s.source) && is_alnum(s.source[s.pos]) {
 				s.pos += 1
 			}
-			if s.pos == seg_start {
+			if n := s.pos - seg_start; n == 0 || n > 8 {
 				set_error(s, .Invalid_Lang_Tag, start)
 				return {}, false
 			}
