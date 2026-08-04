@@ -1,11 +1,16 @@
-// Package trig parses the W3C TriG format (RDF 1.2): the full Turtle
-// grammar plus named graph blocks, yielding quads.
+// Package trig parses and emits the W3C TriG format (RDF 1.2): the full
+// Turtle grammar plus named graph blocks, yielding quads.
 //
 // It is a thin layer over the same parser core as rdf/turtle
 // (rdf/internal/ttl) — the memory contract is identical: intern-table
 // strings live until parser_destroy, everything else in a yielded quad
 // is valid only until its statement has been fully drained (ADR
 // RDF-A-0001, RDF-I-0003).
+//
+// The input is the complete document in one caller-owned buffer
+// (RDF-T-0024); for large files, memory-map the file and pass the
+// mapping. The triple-based subset of this format is rdf/turtle; the
+// line-based sibling is rdf/quads.
 package trig
 
 import rdf ".."
@@ -32,6 +37,10 @@ parser_init :: proc(p: ^Parser, source: []byte, base := "", allocator := context
 	p.core.trig_mode = true
 }
 
+// parser_destroy releases parser-owned memory, including the intern
+// table — intern-owned strings (expanded prefixes, resolved IRIs,
+// synthesized blank-node labels) in previously yielded quads become
+// invalid.
 parser_destroy :: proc(p: ^Parser) {
 	ttl.destroy(&p.core)
 }

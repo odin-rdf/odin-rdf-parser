@@ -6,6 +6,11 @@
 // are unescaped into memory owned by the parser. A yielded triple is
 // valid only until the next parser_next call or parser_destroy — keep
 // statements with rdf.clone or an rdf.Intern_Table (ADR RDF-A-0001).
+//
+// The input is the complete document in one caller-owned buffer
+// (RDF-T-0024); for large files, memory-map the file and pass the
+// mapping. The quad-based sibling format is rdf/quads; the abbreviated
+// human-readable format is rdf/turtle.
 package triples
 
 import rdf ".."
@@ -26,10 +31,15 @@ Parser :: struct {
 	using core: st.Parser,
 }
 
+// parser_init prepares a parse of source, which must contain the complete
+// document and stay valid and unmoved for the parser's lifetime. The
+// allocator serves only copy-on-write unescaping.
 parser_init :: proc(p: ^Parser, source: []byte, allocator := context.allocator) {
 	st.init(&p.core, source, allocator)
 }
 
+// parser_destroy releases parser-owned memory (copy-on-write unescapes);
+// previously yielded triples become invalid.
 parser_destroy :: proc(p: ^Parser) {
 	st.destroy(&p.core)
 }

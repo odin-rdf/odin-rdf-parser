@@ -1,6 +1,10 @@
 // Package rdf provides the core RDF 1.2 data model: terms, triples, and
 // quads, including RDF-star triple terms.
 //
+// The serialization formats live in the subpackages rdf/triples
+// (N-Triples), rdf/quads (N-Quads), rdf/turtle (Turtle), and rdf/trig
+// (TriG); all four parse into and emit from this package's types.
+//
 // Lifetime contract (ADR RDF-A-0001): term strings are borrowed slices by
 // default — typically views into the source buffer a parser was given. A
 // value yielded by a parser is valid only until the next statement is

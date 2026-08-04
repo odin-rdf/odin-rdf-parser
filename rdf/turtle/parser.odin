@@ -1,5 +1,5 @@
-// Package turtle parses the W3C Turtle format (RDF 1.2), including
-// RDF-star.
+// Package turtle parses and emits the W3C Turtle format (RDF 1.2),
+// including RDF-star.
 //
 // Parsing is streaming with the RDF-I-0003 memory contract: prefix
 // expansions, resolved IRIs, and synthesized blank-node labels are
@@ -8,6 +8,11 @@
 // until the statement it came from has been fully drained (one Turtle
 // statement can yield many triples). Keep statements with rdf.clone or
 // an rdf.Intern_Table (ADR RDF-A-0001).
+//
+// The input is the complete document in one caller-owned buffer
+// (RDF-T-0024); for large files, memory-map the file and pass the
+// mapping. The dataset extension of this format is rdf/trig; the
+// line-based sibling is rdf/triples.
 package turtle
 
 import rdf ".."
@@ -35,6 +40,10 @@ parser_init :: proc(p: ^Parser, source: []byte, base := "", allocator := context
 	ttl.init(&p.core, source, base, allocator)
 }
 
+// parser_destroy releases parser-owned memory, including the intern
+// table — intern-owned strings (expanded prefixes, resolved IRIs,
+// synthesized blank-node labels) in previously yielded triples become
+// invalid.
 parser_destroy :: proc(p: ^Parser) {
 	ttl.destroy(&p.core)
 }

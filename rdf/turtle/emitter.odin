@@ -6,7 +6,8 @@ import rdf ".."
 import ttl "../internal/ttl"
 
 // Prefix is one binding of the caller-supplied prefix map; name is
-// without the colon.
+// without the colon. The emitter borrows the prefix slice — it must stay
+// valid until emitter_destroy.
 Prefix :: ttl.Prefix
 
 // Emitter writes Turtle with minimal prefix-aware abbreviation:
@@ -29,6 +30,8 @@ emitter_init :: proc(
 	return ttl.emitter_init(&e.core, w, prefixes, false, allocator)
 }
 
+// emitter_destroy releases the emitter's lookbehind state. It writes
+// nothing — call emitter_finish first to close an open statement.
 emitter_destroy :: proc(e: ^Emitter) {
 	ttl.emitter_destroy(&e.core)
 }
