@@ -30,6 +30,10 @@ Error_Kind :: enum {
 	Invalid_Graph_Label,
 	Unclosed_Triple_Term,
 	Invalid_Direction,
+	// Parser-level, Turtle-family formats (set by rdf/internal/ttl).
+	Expected_Prefix_Name,
+	Expected_IRI,
+	Undefined_Prefix,
 }
 
 // Error is a grammar violation with its position. The zero value (kind
@@ -93,6 +97,12 @@ error_message :: proc(kind: Error_Kind) -> string {
 		return "triple term not closed with ')>>' (tripleTerm)"
 	case .Invalid_Direction:
 		return "base direction must be 'ltr' or 'rtl' (LANG_DIR)"
+	case .Expected_Prefix_Name:
+		return "expected a prefix name ending in ':' (prefixID)"
+	case .Expected_IRI:
+		return "expected an IRI reference (prefixID/base)"
+	case .Undefined_Prefix:
+		return "prefixed name uses an undeclared prefix (PrefixedName)"
 	}
 	return "unknown error"
 }
