@@ -1,0 +1,7 @@
+# OS cruft
+.DS_Store
+
+# Build artifacts
+*.bin
+*.exe
+odin-rdf-parser
