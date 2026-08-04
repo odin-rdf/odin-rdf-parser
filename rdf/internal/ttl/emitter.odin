@@ -387,7 +387,7 @@ decode_rune_in :: proc(s: string, at: int) -> (r: rune, n: int) {
 		return rune(c), 1
 	}
 	r, n = utf8.decode_rune_in_string(s[at:])
-	if r == utf8.RUNE_ERROR {
+	if r == utf8.RUNE_ERROR && n <= 1 {
 		return 0, 0
 	}
 	return r, n

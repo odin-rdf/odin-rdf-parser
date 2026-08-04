@@ -12,6 +12,7 @@ Entry :: struct {
 	name:     string, // mf:name
 	type_str: string, // e.g. "rdft:TestNTriplesPositiveSyntax"
 	action:   string, // input file name relative to the suite directory
+	result:   string, // expected-output file for eval tests ("" otherwise)
 }
 
 // parse_manifest extracts test entries from a manifest.ttl. An entry
@@ -65,6 +66,12 @@ parse_manifest :: proc(source: string, allocator := context.allocator) -> [dynam
 			if open := strings.index_byte(line, '<'); open >= 0 {
 				if close := strings.index_byte(line, '>'); close > open {
 					current.action = line[open + 1:close]
+				}
+			}
+		} else if strings.contains(line, "mf:result") {
+			if open := strings.index_byte(line, '<'); open >= 0 {
+				if close := strings.index_byte(line, '>'); close > open {
+					current.result = line[open + 1:close]
 				}
 			}
 		}

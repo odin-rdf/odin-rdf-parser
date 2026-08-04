@@ -41,6 +41,7 @@ Error_Kind :: enum {
 	Unclosed_Annotation,
 	Unclosed_Graph,
 	Expected_Graph_Block,
+	Expected_Version_String,
 }
 
 // Error is a grammar violation with its position. The zero value (kind
@@ -124,6 +125,8 @@ error_message :: proc(kind: Error_Kind) -> string {
 		return "graph block not closed with '}' (wrappedGraph)"
 	case .Expected_Graph_Block:
 		return "expected '{' after the GRAPH keyword's label (wrappedGraph)"
+	case .Expected_Version_String:
+		return "expected a short quoted string after the version directive (version)"
 	}
 	return "unknown error"
 }

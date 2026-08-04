@@ -16,8 +16,10 @@ Token_Kind :: enum {
 	A, // the keyword 'a' (rdf:type)
 	At_Prefix, // @prefix
 	At_Base, // @base
+	At_Version, // @version (RDF 1.2)
 	Sparql_Prefix, // PREFIX (case-insensitive)
 	Sparql_Base, // BASE (case-insensitive)
+	Sparql_Version, // VERSION (case-insensitive; RDF 1.2)
 	Graph_Keyword, // GRAPH (case-insensitive; TriG only)
 	Datatype_Marker, // ^^
 	Dot, // .
@@ -43,10 +45,11 @@ Token_Kind :: enum {
 // valid as long as the source is. has_escape marks \-escapes only —
 // percent encodings in local names are content, never decoded.
 Token :: struct {
-	kind:       Token_Kind,
-	text:       string,
-	offset:     int, // byte offset of the token start (incl. delimiters)
-	line:       int, // 1-based
-	column:     int, // 1-based, in bytes
-	has_escape: bool,
+	kind:        Token_Kind,
+	text:        string,
+	offset:      int, // byte offset of the token start (incl. delimiters)
+	line:        int, // 1-based
+	column:      int, // 1-based, in bytes
+	has_escape:  bool,
+	long_string: bool, // String_Literal came from a long ("""/''') form
 }

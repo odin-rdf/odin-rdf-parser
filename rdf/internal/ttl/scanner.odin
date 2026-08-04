@@ -237,7 +237,19 @@ scan_iri_ref :: proc(s: ^Scanner, tok: ^Token) -> (Token, bool) {
 			return tok^, true
 		case c == '\\':
 			tok.has_escape = true
-			if !scan_uchar(s) {
+			esc := s.pos
+			value, uok := scan_uchar(s)
+			if !uok {
+				return {}, false
+			}
+			// An escape may not smuggle in a character IRIREF forbids.
+			forbidden := value <= 0x20
+			switch value {
+			case '<', '>', '"', '{', '}', '|', '^', '`', '\\':
+				forbidden = true
+			}
+			if forbidden {
+				set_error(s, .Invalid_IRI_Character, esc)
 				return {}, false
 			}
 		case c <= 0x20 || c == '<' || c == '"' || c == '{' || c == '}' || c == '|' || c == '^' || c == '`':
@@ -250,9 +262,10 @@ scan_iri_ref :: proc(s: ^Scanner, tok: ^Token) -> (Token, bool) {
 }
 
 // scan_uchar validates a UCHAR escape (\uXXXX or \UXXXXXXXX), the only
-// escapes IRIREF permits. s.pos is at the backslash on entry.
+// escapes IRIREF permits, and returns the decoded codepoint. s.pos is
+// at the backslash on entry.
 @(private)
-scan_uchar :: proc(s: ^Scanner) -> bool {
+scan_uchar :: proc(s: ^Scanner) -> (value: u32, ok: bool) {
 	esc := s.pos
 	s.pos += 1
 	if s.pos < len(s.source) {
@@ -266,7 +279,7 @@ scan_uchar :: proc(s: ^Scanner) -> bool {
 		}
 	}
 	set_error(s, .Invalid_Escape, esc)
-	return false
+	return 0, false
 }
 
 // scan_echar_or_uchar validates an ECHAR or UCHAR escape inside a string
@@ -282,26 +295,45 @@ scan_echar_or_uchar :: proc(s: ^Scanner) -> bool {
 			return true
 		case 'u':
 			s.pos += 1
-			return scan_hex(s, 4, esc)
+			_, ok := scan_hex(s, 4, esc)
+			return ok
 		case 'U':
 			s.pos += 1
-			return scan_hex(s, 8, esc)
+			_, ok := scan_hex(s, 8, esc)
+			return ok
 		}
 	}
 	set_error(s, .Invalid_Escape, esc)
 	return false
 }
 
+// scan_hex consumes n hex digits and validates the decoded codepoint:
+// surrogates and values beyond U+10FFFF are not characters and are
+// rejected wherever UCHAR appears (W3C bad-numeric-escape tests).
 @(private)
-scan_hex :: proc(s: ^Scanner, n: int, esc_offset: int) -> bool {
+scan_hex :: proc(s: ^Scanner, n: int, esc_offset: int) -> (value: u32, ok: bool) {
 	for _ in 0 ..< n {
 		if s.pos >= len(s.source) || !scan.is_hex_digit(s.source[s.pos]) {
 			set_error(s, .Invalid_Escape, esc_offset)
-			return false
+			return 0, false
+		}
+		c := s.source[s.pos]
+		value <<= 4
+		switch {
+		case c <= '9':
+			value |= u32(c - '0')
+		case c >= 'a':
+			value |= u32(c - 'a' + 10)
+		case:
+			value |= u32(c - 'A' + 10)
 		}
 		s.pos += 1
 	}
-	return true
+	if (value >= 0xD800 && value <= 0xDFFF) || value > 0x10FFFF {
+		set_error(s, .Invalid_Escape, esc_offset)
+		return 0, false
+	}
+	return value, true
 }
 
 @(private)
@@ -351,15 +383,19 @@ scan_long_string :: proc(s: ^Scanner, tok: ^Token, quote: byte) -> (Token, bool)
 		c := s.source[s.pos]
 		switch {
 		case c == quote:
-			// Count the quote run: a run of 3+ closes the literal with its
-			// final three quotes; shorter runs are content.
+			// The literal closes at the FIRST run of three quotes; any
+			// further quotes belong to following tokens (grammar: content
+			// quote runs are at most two and must be followed by more
+			// content). '"""abc""""' is therefore a syntax error, not a
+			// literal ending in '"'.
 			run_start := s.pos
-			for s.pos < len(s.source) && s.source[s.pos] == quote {
+			for s.pos < len(s.source) && s.source[s.pos] == quote && s.pos - run_start < 3 {
 				s.pos += 1
 			}
-			if s.pos - run_start >= 3 {
+			if s.pos - run_start == 3 {
 				tok.kind = .String_Literal
-				tok.text = string(s.source[content_start:s.pos - 3])
+				tok.long_string = true
+				tok.text = string(s.source[content_start:run_start])
 				return tok^, true
 			}
 		case c == '\\':
@@ -437,6 +473,9 @@ scan_at :: proc(s: ^Scanner, tok: ^Token) -> (Token, bool) {
 			return tok^, true
 		case "base":
 			tok.kind = .At_Base
+			return tok^, true
+		case "version":
+			tok.kind = .At_Version
 			return tok^, true
 		}
 	}
@@ -568,6 +607,9 @@ scan_name :: proc(s: ^Scanner, tok: ^Token) -> (Token, bool) {
 		return tok^, true
 	case eq_fold_ascii(word, "base"):
 		tok.kind = .Sparql_Base
+		return tok^, true
+	case eq_fold_ascii(word, "version"):
+		tok.kind = .Sparql_Version
 		return tok^, true
 	case eq_fold_ascii(word, "graph"):
 		tok.kind = .Graph_Keyword
@@ -725,7 +767,10 @@ decode_rune_at_offset :: proc(s: ^Scanner, at: int) -> (r: rune, n: int) {
 		return rune(c), 1
 	}
 	r, n = utf8.decode_rune(s.source[at:])
-	if r == utf8.RUNE_ERROR {
+	// A genuine U+FFFD decodes as RUNE_ERROR with size 3 and is a legal
+	// PN_CHARS_BASE character (the W3C boundary tests use it); only a
+	// size-1 error marks invalid bytes.
+	if r == utf8.RUNE_ERROR && n <= 1 {
 		return 0, 0
 	}
 	return r, n

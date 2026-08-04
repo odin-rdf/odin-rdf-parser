@@ -164,6 +164,16 @@ next_triple :: proc(p: ^Parser) -> (t: rdf.Triple, ok: bool) {
 				return {}, false
 			}
 			continue
+		case .At_Version:
+			if !parse_version_directive(p, true) {
+				return {}, false
+			}
+			continue
+		case .Sparql_Version:
+			if !parse_version_directive(p, false) {
+				return {}, false
+			}
+			continue
 		}
 
 		if p.trig_mode {
@@ -389,6 +399,28 @@ parse_base_directive :: proc(p: ^Parser, at_form: bool) -> bool {
 		return false
 	}
 	p.base = string(base)
+	if at_form {
+		return expect_dot(p)
+	}
+	return true
+}
+
+// parse_version_directive handles '@version "1.2" .' and the SPARQL
+// form 'VERSION "1.2"' (RDF 1.2). The specifier must be a short quoted
+// string; the value carries no semantics and is discarded.
+@(private)
+parse_version_directive :: proc(p: ^Parser, at_form: bool) -> bool {
+	tok, ok := next_token(p)
+	if !ok {
+		if !scanner_failed(p) {
+			fail_here(p, .Expected_Version_String)
+		}
+		return false
+	}
+	if tok.kind != .String_Literal || tok.long_string {
+		fail_at(p, .Expected_Version_String, tok)
+		return false
+	}
 	if at_form {
 		return expect_dot(p)
 	}

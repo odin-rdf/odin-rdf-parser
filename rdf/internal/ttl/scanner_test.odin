@@ -167,16 +167,34 @@ test_string_forms :: proc(t: ^testing.T) {
 
 @(test)
 test_long_string_quote_runs :: proc(t: ^testing.T) {
-	// A run of 4 closing quotes leaves one quote of content; 5 leave two.
-	src := `"""a"""" """b""""" ""`
+	// The literal closes at the FIRST run of three quotes; interior runs
+	// of one or two are content.
+	src := `"""a"" b"""  ""  """"""`
 	s: Scanner
 	scanner_init(&s, transmute([]byte)src)
 	a, _ := scanner_next(&s)
-	testing.expect_value(t, a.text, `a"`)
+	testing.expect_value(t, a.text, `a"" b`)
 	b, _ := scanner_next(&s)
-	testing.expect_value(t, b.text, `b""`)
+	testing.expect_value(t, b.text, "")
+	testing.expect(t, !b.long_string)
 	c, _ := scanner_next(&s)
 	testing.expect_value(t, c.text, "")
+	testing.expect(t, c.long_string)
+
+	// A run of four quotes is a closed literal plus a stray quote —
+	// a syntax error, matching the W3C bad-string tests.
+	bad := `"""abc""""@en`
+	scanner_init(&s, transmute([]byte)bad)
+	first, ok := scanner_next(&s)
+	testing.expect(t, ok)
+	testing.expect_value(t, first.text, "abc")
+	for {
+		_, more := scanner_next(&s)
+		if !more {
+			break
+		}
+	}
+	testing.expect_value(t, s.err.kind, Error_Kind.Unterminated_String)
 }
 
 @(test)
