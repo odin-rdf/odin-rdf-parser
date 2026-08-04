@@ -39,6 +39,8 @@ Error_Kind :: enum {
 	Nesting_Too_Deep,
 	Unclosed_Reified_Triple,
 	Unclosed_Annotation,
+	Unclosed_Graph,
+	Expected_Graph_Block,
 }
 
 // Error is a grammar violation with its position. The zero value (kind
@@ -118,6 +120,10 @@ error_message :: proc(kind: Error_Kind) -> string {
 		return "reified triple not closed with '>>' (reifiedTriple)"
 	case .Unclosed_Annotation:
 		return "annotation block not closed with '|}' (annotationBlock)"
+	case .Unclosed_Graph:
+		return "graph block not closed with '}' (wrappedGraph)"
+	case .Expected_Graph_Block:
+		return "expected '{' after the GRAPH keyword's label (wrappedGraph)"
 	}
 	return "unknown error"
 }

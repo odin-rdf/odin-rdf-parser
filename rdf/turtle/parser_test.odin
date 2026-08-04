@@ -558,6 +558,10 @@ test_parser_errors :: proc(t: ^testing.T) {
 	)
 	// Relative initial base is rejected at init.
 	expect_error(t, `<http://e/s> <http://e/p> <http://e/o> .`, .Relative_IRI, "not-absolute")
+	// TriG-only syntax is rejected in Turtle mode.
+	expect_error(t, EX_PRE + "{ ex:s ex:p ex:o }", .Expected_Subject)
+	expect_error(t, EX_PRE + "GRAPH ex:g { ex:s ex:p ex:o }", .Expected_Subject)
+	expect_error(t, EX_PRE + "ex:g { ex:s ex:p ex:o }", .Expected_Predicate)
 }
 
 @(test)

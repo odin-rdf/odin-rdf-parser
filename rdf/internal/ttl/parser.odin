@@ -40,6 +40,13 @@ Parser :: struct {
 	anon_counter:  int,
 	depth:         int, // current [ ] / ( ) / << >> nesting
 	err:           Error,
+	// TriG state. trig_mode enables graph blocks and the GRAPH keyword;
+	// current_graph is the graph label of the most recently parsed
+	// statement (nil = default graph) — constant while its queue drains,
+	// which is how the trig layer attaches graphs to yielded triples.
+	trig_mode:     bool,
+	in_graph:      bool,
+	current_graph: rdf.Graph_Label,
 }
 
 // MAX_NESTING_DEPTH bounds recursive structures so pathological input
@@ -113,29 +120,21 @@ next_triple :: proc(p: ^Parser) -> (t: rdf.Triple, ok: bool) {
 	p.queue_head = 0
 
 	for {
+		p.depth = 0
 		tok, tok_ok := next_token(p)
 		if !tok_ok {
-			_ = scanner_failed(p)
+			if !scanner_failed(p) && p.in_graph {
+				fail_here(p, .Unclosed_Graph)
+			}
 			return {}, false
 		}
-		#partial switch tok.kind {
-		case .At_Prefix:
-			if !parse_prefix_directive(p, true) {
-				return {}, false
+
+		if p.in_graph {
+			if tok.kind == .R_Brace {
+				p.in_graph = false
+				p.current_graph = nil
+				continue
 			}
-		case .Sparql_Prefix:
-			if !parse_prefix_directive(p, false) {
-				return {}, false
-			}
-		case .At_Base:
-			if !parse_base_directive(p, true) {
-				return {}, false
-			}
-		case .Sparql_Base:
-			if !parse_base_directive(p, false) {
-				return {}, false
-			}
-		case:
 			if !parse_triples(p, tok) {
 				return {}, false
 			}
@@ -143,7 +142,190 @@ next_triple :: proc(p: ^Parser) -> (t: rdf.Triple, ok: bool) {
 			p.queue_head += 1
 			return t, true
 		}
+
+		#partial switch tok.kind {
+		case .At_Prefix:
+			if !parse_prefix_directive(p, true) {
+				return {}, false
+			}
+			continue
+		case .Sparql_Prefix:
+			if !parse_prefix_directive(p, false) {
+				return {}, false
+			}
+			continue
+		case .At_Base:
+			if !parse_base_directive(p, true) {
+				return {}, false
+			}
+			continue
+		case .Sparql_Base:
+			if !parse_base_directive(p, false) {
+				return {}, false
+			}
+			continue
+		}
+
+		if p.trig_mode {
+			entered, parsed, block_ok := parse_block_start(p, tok)
+			if !block_ok {
+				return {}, false
+			}
+			if entered {
+				continue
+			}
+			if parsed {
+				t = p.queue[p.queue_head]
+				p.queue_head += 1
+				return t, true
+			}
+		}
+
+		if !parse_triples(p, tok) {
+			return {}, false
+		}
+		t = p.queue[p.queue_head]
+		p.queue_head += 1
+		return t, true
 	}
+}
+
+// parse_block_start handles the TriG top-level forms whose first token
+// is ambiguous with plain triples: '{ … }', 'GRAPH label { … }',
+// 'label { … }', and '[] { … }'. entered reports a graph block was
+// opened; parsed reports the label turned out to be a subject and its
+// whole statement was parsed into the queue. Both false (with ok) means
+// the token was not consumed and the caller parses plain triples.
+@(private)
+parse_block_start :: proc(p: ^Parser, tok: Token) -> (entered: bool, parsed: bool, ok: bool) {
+	#partial switch tok.kind {
+	case .L_Brace:
+		p.in_graph = true
+		p.current_graph = nil
+		return true, false, true
+
+	case .Graph_Keyword:
+		label, lok := parse_graph_label(p)
+		if !lok {
+			return false, false, false
+		}
+		open, ook := next_token(p)
+		if !ook {
+			if !scanner_failed(p) {
+				fail_here(p, .Expected_Graph_Block)
+			}
+			return false, false, false
+		}
+		if open.kind != .L_Brace {
+			fail_at(p, .Expected_Graph_Block, open)
+			return false, false, false
+		}
+		p.in_graph = true
+		p.current_graph = label
+		return true, false, true
+
+	case .IRI_Ref, .PName, .Blank_Node_Label:
+		// 'labelOrSubject (wrappedGraph | predicateObjectList '.')' —
+		// parse the term, then a '{' decides.
+		subject, sok := parse_subject(p, tok)
+		if !sok {
+			return false, false, false
+		}
+		if peeked, has := peek_token(p); has && peeked.kind == .L_Brace {
+			_, _ = next_token(p)
+			p.in_graph = true
+			p.current_graph = term_to_graph_label(subject)
+			return true, false, true
+		} else if !has && scanner_failed(p) {
+			return false, false, false
+		}
+		if !parse_predicate_object_list(p, subject) {
+			return false, false, false
+		}
+		if !expect_statement_end(p) {
+			return false, false, false
+		}
+		return false, true, true
+
+	case .L_Bracket:
+		// A bare ANON can also be a graph label ('[] { … }') — a
+		// blankNodePropertyList requires a non-empty list, so only the
+		// empty form is ambiguous.
+		subject, has_props, bok := parse_bnode_property_list(p, tok)
+		if !bok {
+			return false, false, false
+		}
+		if !has_props {
+			if peeked, has := peek_token(p); has && peeked.kind == .L_Brace {
+				_, _ = next_token(p)
+				p.in_graph = true
+				p.current_graph = subject.(rdf.Blank_Node)
+				return true, false, true
+			} else if !has && scanner_failed(p) {
+				return false, false, false
+			}
+		}
+		if has_props {
+			peeked, has := peek_token(p)
+			if !has && scanner_failed(p) {
+				return false, false, false
+			}
+			if has && peeked.kind == .Dot {
+				return false, true, expect_statement_end(p)
+			}
+		}
+		if !parse_predicate_object_list(p, subject) {
+			return false, false, false
+		}
+		return false, true, expect_statement_end(p)
+	}
+	return false, false, true
+}
+
+@(private)
+parse_graph_label :: proc(p: ^Parser) -> (label: rdf.Graph_Label, ok: bool) {
+	tok, tok_ok := next_token(p)
+	if !tok_ok {
+		if !scanner_failed(p) {
+			fail_here(p, .Invalid_Graph_Label)
+		}
+		return nil, false
+	}
+	#partial switch tok.kind {
+	case .IRI_Ref:
+		term, iok := iri_ref_term(p, tok)
+		if !iok {
+			return nil, false
+		}
+		return term.(rdf.IRI), true
+	case .PName:
+		term, pok := pname_term(p, tok)
+		if !pok {
+			return nil, false
+		}
+		return term.(rdf.IRI), true
+	case .Blank_Node_Label:
+		return doc_blank_node(p, tok).(rdf.Blank_Node), true
+	case .L_Bracket:
+		term, aok := parse_anon(p, tok)
+		if !aok {
+			return nil, false
+		}
+		return term.(rdf.Blank_Node), true
+	}
+	fail_at(p, .Invalid_Graph_Label, tok)
+	return nil, false
+}
+
+@(private)
+term_to_graph_label :: proc(term: rdf.Term) -> rdf.Graph_Label {
+	#partial switch v in term {
+	case rdf.IRI:
+		return v
+	case rdf.Blank_Node:
+		return v
+	}
+	return nil
 }
 
 // parse_prefix_directive handles '@prefix p: <iri> .' and the SPARQL
@@ -244,15 +426,38 @@ parse_triples :: proc(p: ^Parser, first: Token) -> bool {
 		return false
 	}
 	if pol_optional {
-		if peeked, has := peek_token(p); has && peeked.kind == .Dot {
-			_, _ = next_token(p)
-			return true
-		} else if !has && scanner_failed(p) {
+		peeked, has := peek_token(p)
+		if !has && scanner_failed(p) {
 			return false
+		}
+		if has && (peeked.kind == .Dot || (p.in_graph && peeked.kind == .R_Brace)) {
+			return expect_statement_end(p)
 		}
 	}
 	if !parse_predicate_object_list(p, subject) {
 		return false
+	}
+	return expect_statement_end(p)
+}
+
+// expect_statement_end consumes the statement terminator: a '.', or —
+// inside a TriG graph block, where the final dot is optional
+// ('triplesBlock ::= triples ('.' triplesBlock?)?') — a '}' left for
+// the block loop to consume.
+@(private)
+expect_statement_end :: proc(p: ^Parser) -> bool {
+	if p.in_graph {
+		peeked, has := peek_token(p)
+		if !has {
+			if scanner_failed(p) {
+				return false
+			}
+			fail_here(p, .Unclosed_Graph)
+			return false
+		}
+		if peeked.kind == .R_Brace {
+			return true
+		}
 	}
 	return expect_dot(p)
 }
