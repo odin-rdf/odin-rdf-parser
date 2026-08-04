@@ -4,14 +4,14 @@ level: initiative
 title: "N-Triples & N-Quads Parsers and Emitters"
 short_code: "RDF-I-0002"
 created_at: 2026-08-04T11:02:46.211117+00:00
-updated_at: 2026-08-04T12:54:38.314553+00:00
+updated_at: 2026-08-04T13:38:28.465705+00:00
 parent: RDF-V-0001
 blocked_by: [RDF-I-0001]
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/decompose"
+  - "#phase/active"
 
 
 exit_criteria_met: false
