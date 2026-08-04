@@ -24,58 +24,60 @@ Format :: enum {
 
 @(test)
 test_w3c_rdf11_ntriples :: proc(t: ^testing.T) {
-	run_suite(t, "rdf11-ntriples", .N_Triples, "")
+	run_suite(t, "rdf11-ntriples", .N_Triples, "", 70)
 }
 
 @(test)
 test_w3c_rdf11_nquads :: proc(t: ^testing.T) {
-	run_suite(t, "rdf11-nquads", .N_Quads, "")
+	run_suite(t, "rdf11-nquads", .N_Quads, "", 87)
 }
 
 @(test)
 test_w3c_rdf12_ntriples :: proc(t: ^testing.T) {
-	run_suite(t, "rdf12-ntriples-syntax", .N_Triples, "")
+	run_suite(t, "rdf12-ntriples-syntax", .N_Triples, "", 29)
 }
 
 @(test)
 test_w3c_rdf12_nquads :: proc(t: ^testing.T) {
-	run_suite(t, "rdf12-nquads-syntax", .N_Quads, "")
+	run_suite(t, "rdf12-nquads-syntax", .N_Quads, "", 27)
 }
 
 @(test)
 test_w3c_rdf11_turtle :: proc(t: ^testing.T) {
-	run_suite(t, "rdf11-turtle", .Turtle, "https://w3c.github.io/rdf-tests/rdf/rdf11/rdf-turtle/")
+	run_suite(t, "rdf11-turtle", .Turtle, "https://w3c.github.io/rdf-tests/rdf/rdf11/rdf-turtle/", 313)
 }
 
 @(test)
 test_w3c_rdf11_trig :: proc(t: ^testing.T) {
-	run_suite(t, "rdf11-trig", .TriG, "https://w3c.github.io/rdf-tests/rdf/rdf11/rdf-trig/")
+	run_suite(t, "rdf11-trig", .TriG, "https://w3c.github.io/rdf-tests/rdf/rdf11/rdf-trig/", 356)
 }
 
 @(test)
 test_w3c_rdf12_turtle_syntax :: proc(t: ^testing.T) {
-	run_suite(t, "rdf12-turtle-syntax", .Turtle, "https://w3c.github.io/rdf-tests/rdf/rdf12/rdf-turtle/syntax/")
+	run_suite(t, "rdf12-turtle-syntax", .Turtle, "https://w3c.github.io/rdf-tests/rdf/rdf12/rdf-turtle/syntax/", 74)
 }
 
 @(test)
 test_w3c_rdf12_turtle_eval :: proc(t: ^testing.T) {
-	run_suite(t, "rdf12-turtle-eval", .Turtle, "https://w3c.github.io/rdf-tests/rdf/rdf12/rdf-turtle/eval/")
+	run_suite(t, "rdf12-turtle-eval", .Turtle, "https://w3c.github.io/rdf-tests/rdf/rdf12/rdf-turtle/eval/", 29)
 }
 
 @(test)
 test_w3c_rdf12_trig_syntax :: proc(t: ^testing.T) {
-	run_suite(t, "rdf12-trig-syntax", .TriG, "https://w3c.github.io/rdf-tests/rdf/rdf12/rdf-trig/syntax/")
+	run_suite(t, "rdf12-trig-syntax", .TriG, "https://w3c.github.io/rdf-tests/rdf/rdf12/rdf-trig/syntax/", 35)
 }
 
 @(test)
 test_w3c_rdf12_trig_eval :: proc(t: ^testing.T) {
-	run_suite(t, "rdf12-trig-eval", .TriG, "https://w3c.github.io/rdf-tests/rdf/rdf12/rdf-trig/eval/")
+	run_suite(t, "rdf12-trig-eval", .TriG, "https://w3c.github.io/rdf-tests/rdf/rdf12/rdf-trig/eval/", 25)
 }
 
 // run_suite runs every manifest entry. base is the suite's
 // mf:assumedTestBase; each test's base IRI is base + action, per the
-// W3C convention.
-run_suite :: proc(t: ^testing.T, suite: string, format: Format, base: string) {
+// W3C convention. expected_count pins the entry count recorded when the
+// suite first passed — the guard against a manifest-reader regression
+// silently dropping tests (RDF-T-0020).
+run_suite :: proc(t: ^testing.T, suite: string, format: Format, base: string, expected_count: int) {
 	manifest_path, _ := filepath.join({SUITE_ROOT, suite, "manifest.ttl"})
 	defer delete(manifest_path)
 	manifest_data, manifest_err := os.read_entire_file(manifest_path, context.allocator)
@@ -85,8 +87,15 @@ run_suite :: proc(t: ^testing.T, suite: string, format: Format, base: string) {
 	defer delete(manifest_data)
 
 	entries := parse_manifest(string(manifest_data))
-	defer delete(entries)
-	testing.expectf(t, len(entries) > 0, "%s: no entries parsed from manifest", suite)
+	defer destroy_entries(&entries)
+	testing.expectf(
+		t,
+		len(entries) == expected_count,
+		"%s: manifest yielded %d entries, expected %d — reader regression?",
+		suite,
+		len(entries),
+		expected_count,
+	)
 
 	passed := 0
 	for e in entries {
