@@ -35,7 +35,7 @@ The library is deliberately low-level: it supplies the primitives on which highe
 
 ## Current State
 
-The project is at its inception. No parsing or emitting functionality exists yet. Odin has no established RDF ecosystem, so this library starts from a clean slate with no legacy constraints.
+The core scope is delivered (2026-08-04): the data model (RDF-I-0001) and parsers/emitters for all four formats (RDF-I-0002, RDF-I-0003) are complete, passing all 1045 tests across the 10 vendored W3C suites, including RDF-star, with steady-state-zero-allocation parsing verified by benchmarks. The finish-up backlog is done: the large-document streaming contract is decided and documented (RDF-T-0024: whole-document buffer, mmap for large files), the public API carries full contract documentation (RDF-T-0023), and the repo has a README with compile-verified examples (RDF-T-0022). The sole open success criterion is downstream validation, which awaits the first consumer project (the planned odin-rdf-sparql).
 
 ## Future State
 
@@ -66,7 +66,7 @@ A complete, well-tested Odin library where:
 - **Standards first**: Conformance to the W3C RDF 1.1/1.2 specifications takes precedence over convenience shortcuts.
 - **Primitives over frameworks**: Provide small, composable building blocks; leave policy and higher-level abstractions to downstream projects.
 - **Idiomatic Odin**: Embrace Odin conventions — explicit memory management, allocator awareness, and straightforward procedural APIs.
-- **Streaming-friendly**: Parsing and emitting should be usable on large documents without requiring the whole graph in memory.
+- **Streaming-friendly**: Parsing and emitting are statement-at-a-time and never materialize the graph; parser memory is bounded by nesting depth and the prefix map, not document size. The document text itself lives in a caller-owned buffer — whole-document-in-buffer is the input contract, with memory-mapping as the intended path for large files (decided in RDF-T-0024).
 - **Test-suite driven**: Use the official W3C test suites as the primary measure of correctness.
 
 ## Constraints

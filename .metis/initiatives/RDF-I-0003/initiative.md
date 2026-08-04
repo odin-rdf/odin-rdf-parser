@@ -4,14 +4,14 @@ level: initiative
 title: "Turtle & TriG Parsers and Emitters"
 short_code: "RDF-I-0003"
 created_at: 2026-08-04T14:15:09.787659+00:00
-updated_at: 2026-08-04T15:13:15.063304+00:00
+updated_at: 2026-08-04T16:16:30.429259+00:00
 parent: RDF-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -87,3 +87,14 @@ Critical path: RDF-T-0012 → 0014 → 0015 → 0016 → 0017 → 0019. Off-path
 ## Status Updates
 
 **2026-08-04 — Decomposed into 10 tasks (RDF-T-0012 … RDF-T-0021).** Each task carries objective, acceptance criteria, approach, dependencies, and risks reflecting the design decisions above. Awaiting review and approval to transition to active.
+
+**2026-08-04 — ALL 10 TASKS COMPLETED. Awaiting review for transition to completed.**
+
+Delivered, in 8 commits (a27e8b3 … HEAD):
+- `rdf/internal/ttl`: shared Turtle-family scanner + parser core + emitter core; `rdf/internal/iri`: RFC 3986 resolution.
+- `rdf/turtle` and `rdf/trig`: parsers (full RDF 1.2 incl. the star surface and the VERSION directive) and prefix-aware emitters, both thin layers over the shared core.
+- **Conformance: 100% — all 1045 tests across 10 vendored W3C suites** (213 line-based + 832 Turtle/TriG), including eval tests via blank-node-bijection graph comparison. Suite bring-up surfaced and fixed 4 real parser bugs (surrogate escapes, IRI escape smuggling, long-string closing rule, U+FFFD decoding).
+- Harness manifest reader replaced with the real Turtle parser (RDF-T-0010 debt retired), with pinned per-suite entry counts guarding the circularity risk.
+- Allocation guards prove steady-state-zero parsing and exact interning effectiveness (one table entry per distinct string); baselines: Turtle parse 7.2M triples/s, TriG 6.5M, emitters ~10.5M; prefix expansion + interning costs ~32% in statement rate vs the flat N-Triples path.
+
+Two design refinements made during execution, both recorded in task notes: the blank-node collision scheme is remapping-based (document labels matching `^B*b[0-9]+$` get a `B` prepended) since grammar-level avoidance is impossible, and eval comparison went straight to full isomorphism because expected files are unordered and RDF graphs are sets (evidence: turtle12-eval-annotation-07).
