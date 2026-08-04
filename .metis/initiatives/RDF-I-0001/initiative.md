@@ -4,14 +4,14 @@ level: initiative
 title: "Core RDF Data Model"
 short_code: "RDF-I-0001"
 created_at: 2026-08-04T09:30:01.147570+00:00
-updated_at: 2026-08-04T12:31:19.306178+00:00
+updated_at: 2026-08-04T12:49:23.290814+00:00
 parent: RDF-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false

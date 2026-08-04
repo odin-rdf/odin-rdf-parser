@@ -13,6 +13,7 @@ equal :: proc {
 	equal_graph_label,
 }
 
+// equal_term compares two terms structurally; see equal.
 equal_term :: proc(a, b: Term) -> bool {
 	switch av in a {
 	case IRI:
@@ -40,16 +41,21 @@ equal_term :: proc(a, b: Term) -> bool {
 	return a == nil && b == nil
 }
 
+// equal_triple compares two triples structurally; see equal.
 equal_triple :: proc(a, b: Triple) -> bool {
 	return equal_term(a.subject, b.subject) &&
 		equal_term(a.predicate, b.predicate) &&
 		equal_term(a.object, b.object)
 }
 
+// equal_quad compares two quads structurally, graph labels included;
+// see equal.
 equal_quad :: proc(a, b: Quad) -> bool {
 	return equal_triple(a.triple, b.triple) && equal_graph_label(a.graph, b.graph)
 }
 
+// equal_graph_label compares two graph labels; nil (the default graph)
+// equals only nil. See equal.
 equal_graph_label :: proc(a, b: Graph_Label) -> bool {
 	switch av in a {
 	case IRI:

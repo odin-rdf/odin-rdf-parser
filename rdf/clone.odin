@@ -26,6 +26,7 @@ destroy :: proc {
 	destroy_graph_label,
 }
 
+// clone_term deep-copies a term; see clone.
 clone_term :: proc(term: Term, allocator := context.allocator) -> Term {
 	switch v in term {
 	case IRI:
@@ -47,6 +48,7 @@ clone_term :: proc(term: Term, allocator := context.allocator) -> Term {
 	return nil
 }
 
+// clone_triple deep-copies a triple; see clone.
 clone_triple :: proc(t: Triple, allocator := context.allocator) -> Triple {
 	return {
 		subject   = clone_term(t.subject, allocator),
@@ -55,6 +57,7 @@ clone_triple :: proc(t: Triple, allocator := context.allocator) -> Triple {
 	}
 }
 
+// clone_quad deep-copies a quad, graph label included; see clone.
 clone_quad :: proc(q: Quad, allocator := context.allocator) -> Quad {
 	return {
 		triple = clone_triple(q.triple, allocator),
@@ -62,6 +65,7 @@ clone_quad :: proc(q: Quad, allocator := context.allocator) -> Quad {
 	}
 }
 
+// clone_graph_label deep-copies a graph label; see clone.
 clone_graph_label :: proc(g: Graph_Label, allocator := context.allocator) -> Graph_Label {
 	switch v in g {
 	case IRI:
@@ -72,6 +76,7 @@ clone_graph_label :: proc(g: Graph_Label, allocator := context.allocator) -> Gra
 	return nil
 }
 
+// destroy_term releases a cloned term; see destroy.
 destroy_term :: proc(term: Term, allocator := context.allocator) {
 	switch v in term {
 	case IRI:
@@ -88,17 +93,20 @@ destroy_term :: proc(term: Term, allocator := context.allocator) {
 	}
 }
 
+// destroy_triple releases a cloned triple; see destroy.
 destroy_triple :: proc(t: Triple, allocator := context.allocator) {
 	destroy_term(t.subject, allocator)
 	destroy_term(t.predicate, allocator)
 	destroy_term(t.object, allocator)
 }
 
+// destroy_quad releases a cloned quad; see destroy.
 destroy_quad :: proc(q: Quad, allocator := context.allocator) {
 	destroy_triple(q.triple, allocator)
 	destroy_graph_label(q.graph, allocator)
 }
 
+// destroy_graph_label releases a cloned graph label; see destroy.
 destroy_graph_label :: proc(g: Graph_Label, allocator := context.allocator) {
 	switch v in g {
 	case IRI:

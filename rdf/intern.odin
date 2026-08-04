@@ -13,12 +13,16 @@ Intern_Table :: struct {
 	allocator: runtime.Allocator,
 }
 
+// intern_table_init prepares a table; all table memory comes from the
+// given allocator.
 intern_table_init :: proc(t: ^Intern_Table, allocator := context.allocator) {
 	t.allocator = allocator
 	t.entries = make(map[string]string, 8, allocator)
 	t.triples = make([dynamic]^Triple, 0, 8, allocator)
 }
 
+// intern_table_destroy frees everything the table owns; all values
+// obtained from it become invalid.
 intern_table_destroy :: proc(t: ^Intern_Table) {
 	for _, owned in t.entries {
 		delete(owned, t.allocator)
@@ -66,6 +70,7 @@ intern_term :: proc(t: ^Intern_Table, term: Term) -> Term {
 	return nil
 }
 
+// intern_triple returns a triple whose terms are interned; see intern_term.
 intern_triple :: proc(t: ^Intern_Table, tr: Triple) -> Triple {
 	return {
 		subject   = intern_term(t, tr.subject),
@@ -74,6 +79,8 @@ intern_triple :: proc(t: ^Intern_Table, tr: Triple) -> Triple {
 	}
 }
 
+// intern_quad returns a quad whose terms and graph label are interned;
+// see intern_term.
 intern_quad :: proc(t: ^Intern_Table, q: Quad) -> Quad {
 	result := Quad {
 		triple = intern_triple(t, q.triple),

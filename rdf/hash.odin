@@ -13,19 +13,23 @@ hash :: proc {
 	hash_graph_label,
 }
 
+// hash_term hashes a term; see hash.
 hash_term :: proc(term: Term) -> u64 {
 	return hash_term_seeded(term, FNV64A_OFFSET_BASIS)
 }
 
+// hash_triple hashes a triple; see hash.
 hash_triple :: proc(t: Triple) -> u64 {
 	return hash_triple_seeded(t, FNV64A_OFFSET_BASIS)
 }
 
+// hash_quad hashes a quad, graph label included; see hash.
 hash_quad :: proc(q: Quad) -> u64 {
 	h := hash_triple_seeded(q.triple, FNV64A_OFFSET_BASIS)
 	return hash_graph_label_seeded(q.graph, h)
 }
 
+// hash_graph_label hashes a graph label; see hash.
 hash_graph_label :: proc(g: Graph_Label) -> u64 {
 	return hash_graph_label_seeded(g, FNV64A_OFFSET_BASIS)
 }
