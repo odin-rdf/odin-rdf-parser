@@ -4,14 +4,14 @@ level: initiative
 title: "N-Triples & N-Quads Parsers and Emitters"
 short_code: "RDF-I-0002"
 created_at: 2026-08-04T11:02:46.211117+00:00
-updated_at: 2026-08-04T11:02:46.211117+00:00
+updated_at: 2026-08-04T12:54:38.314553+00:00
 parent: RDF-V-0001
-blocked_by: ["RDF-I-0001"]
+blocked_by: [RDF-I-0001]
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/discovery"
+  - "#phase/decompose"
 
 
 exit_criteria_met: false
@@ -48,17 +48,18 @@ Parser style is fixed by **ADR RDF-A-0001**: hand-written streaming pull parser 
 
 ## Detailed Design
 
-To be developed during design. Known shape and open questions:
+All design questions resolved (design session 2026-08-04):
 
-- **Shared core**: one scanner and statement parser parameterized (or lightly branched) over triple-vs-quad; N-Triples is effectively N-Quads minus the graph label. **Package split resolved in RDF-I-0001's design**: two thin packages — `rdf/triples` (N-Triples) and `rdf/quads` (N-Quads) — over a shared internal scanner package, importing the core model via `import rdf ".."`.
-- **API surface**: `parser_init(source: []byte, allocator)` / `parser_next` / `parser_destroy`, mirrored by `emitter` procedures writing to an `io.Writer` or `[]byte` builder — exact shape to align with data-model conventions from RDF-I-0001.
-- **Escape handling**: scanner records whether a token contains `\`; unescape-on-yield only then. Emitter side: minimal mandatory escaping per spec.
-- **Error model**: error value with byte offset, line/column, and the violated grammar production; decide Odin idiom (enum + details struct vs. message string).
-- **Test harness**: reads the W3C manifest format; vendored copies of the official test suites live in the repo (they are static W3C artifacts, not a code dependency).
+- ~~**Shared core**~~ — **resolved**: two thin packages — `rdf/triples` (N-Triples) and `rdf/quads` (N-Quads) — over a shared internal scanner package, importing the core model via `import rdf ".."`.
+- ~~**Parser API**~~ — **resolved**: scanner idiom, matching `core:bufio.Scanner`. `parser_init(p: ^Parser, source: []byte, allocator := context.allocator)`, then `parser_next(p) -> (stmt, ok: bool)` in a plain `for` loop; after the loop, `p.err` distinguishes clean EOF from a syntax error. `parser_destroy` releases copy-on-write allocations. Zero error plumbing per iteration; error details live on the parser where position state already is.
+- ~~**Error model**~~ — **resolved**: `Error :: struct { kind: Error_Kind, offset: int, line: int, column: int }` with `Error_Kind` an enum of grammar violations, plus a formatting proc that renders the message with the spec production reference. Programmatic matching for the negative-syntax harness; no allocation.
+- ~~**Emitter output**~~ — **resolved**: emitters write to `core:io`'s `io.Writer`. One code path for files, `strings.Builder`, and custom streams; matches `core:encoding/json` idiom. Emitter side does minimal mandatory escaping per spec (inverse of parser unescaping).
+- **Escape handling** (per ADR RDF-A-0001): scanner records whether a token contains `\`; unescape-on-yield only then, from the parser's allocator.
+- ~~**Test harness**~~ — **resolved**: official N-Triples/N-Quads suites vendored under `tests/w3c/` (static W3C artifacts; hermetic, offline-reproducible), downloaded once during the harness task with source URL and retrieval date recorded. Harness reads the W3C manifest format and is built for reuse by the Turtle/TriG initiative.
 
 ## Alternatives Considered
 
-Parser architecture alternatives were analyzed and settled in ADR RDF-A-0001; they are not revisited here. Remaining local alternatives (single shared package vs. per-format packages, error-model shape) will be recorded as this section fills in during design.
+Parser architecture alternatives were analyzed and settled in ADR RDF-A-0001; they are not revisited here. Local alternatives considered in the 2026-08-04 design session: Go-style `(stmt, err)` iteration and three-way returns (rejected — per-iteration error plumbing, EOF-as-error un-idiomatic in Odin); enum-only and message-string errors (rejected — position lost off-parser / not matchable and allocating); `strings.Builder`-only emitters (rejected — forces whole-output buffering, contradicting the streaming principle); fetch-script and git-submodule test data (rejected — network-dependent tests / far more data and friction than needed).
 
 ## Implementation Plan
 
