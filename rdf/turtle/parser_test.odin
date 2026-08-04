@@ -1,8 +1,34 @@
 package turtle
 
+import "core:mem"
+import "core:strings"
 import "core:testing"
 
 import rdf ".."
+
+EX_PRE :: "@prefix ex: <http://e/> .\n"
+
+ex :: proc(local: string) -> rdf.IRI {
+	context.allocator = context.temp_allocator
+	return rdf.IRI(strings.concatenate({"http://e/", local}))
+}
+
+next_expect :: proc(t: ^testing.T, p: ^Parser, s, pr, o: rdf.Term, loc := #caller_location) {
+	tr, ok := parser_next(p)
+	testing.expectf(t, ok, "missing triple (err %v)", p.err.kind, loc = loc)
+	if !ok {
+		return
+	}
+	testing.expectf(t, rdf.equal_term(tr.subject, s), "subject: got %v, want %v", tr.subject, s, loc = loc)
+	testing.expectf(t, rdf.equal_term(tr.predicate, pr), "predicate: got %v, want %v", tr.predicate, pr, loc = loc)
+	testing.expectf(t, rdf.equal_term(tr.object, o), "object: got %v, want %v", tr.object, o, loc = loc)
+}
+
+expect_end :: proc(t: ^testing.T, p: ^Parser, loc := #caller_location) {
+	_, ok := parser_next(p)
+	testing.expectf(t, !ok, "expected end of input", loc = loc)
+	testing.expectf(t, p.err.kind == Error_Kind.None, "err %v", p.err.kind, loc = loc)
+}
 
 expect_error :: proc(t: ^testing.T, src: string, kind: Error_Kind, base := "", loc := #caller_location) {
 	p: Parser
@@ -221,6 +247,139 @@ test_long_strings_pass_through :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_predicate_and_object_lists :: proc(t: ^testing.T) {
+	src := EX_PRE + "ex:s ex:p1 ex:o1 ; ex:p2 ex:o2 , ex:o3 ;; ex:p3 ex:o4 ; .\n"
+	p: Parser
+	parser_init(&p, transmute([]byte)src)
+	defer parser_destroy(&p)
+
+	next_expect(t, &p, ex("s"), ex("p1"), ex("o1"))
+	next_expect(t, &p, ex("s"), ex("p2"), ex("o2"))
+	next_expect(t, &p, ex("s"), ex("p2"), ex("o3"))
+	next_expect(t, &p, ex("s"), ex("p3"), ex("o4"))
+	expect_end(t, &p)
+}
+
+@(test)
+test_numeric_and_boolean_literals :: proc(t: ^testing.T) {
+	src := EX_PRE + "ex:s ex:p 42 , -4.2 , 1.5e3 , true , false .\n"
+	p: Parser
+	parser_init(&p, transmute([]byte)src)
+	defer parser_destroy(&p)
+
+	next_expect(t, &p, ex("s"), ex("p"), rdf.literal_typed("42", rdf.XSD_INTEGER))
+	next_expect(t, &p, ex("s"), ex("p"), rdf.literal_typed("-4.2", rdf.XSD_DECIMAL))
+	next_expect(t, &p, ex("s"), ex("p"), rdf.literal_typed("1.5e3", rdf.XSD_DOUBLE))
+	next_expect(t, &p, ex("s"), ex("p"), rdf.literal_typed("true", rdf.XSD_BOOLEAN))
+	next_expect(t, &p, ex("s"), ex("p"), rdf.literal_typed("false", rdf.XSD_BOOLEAN))
+	expect_end(t, &p)
+}
+
+@(test)
+test_anon_blank_nodes :: proc(t: ^testing.T) {
+	src := EX_PRE + "[ ] ex:p ex:o .\nex:s ex:q [ ] .\n"
+	p: Parser
+	parser_init(&p, transmute([]byte)src)
+	defer parser_destroy(&p)
+
+	next_expect(t, &p, rdf.Blank_Node("b0"), ex("p"), ex("o"))
+	next_expect(t, &p, ex("s"), ex("q"), rdf.Blank_Node("b1"))
+	expect_end(t, &p)
+}
+
+@(test)
+test_bnode_property_lists :: proc(t: ^testing.T) {
+	// Nested-structure triples precede the triple referencing the node.
+	src := EX_PRE +
+		"ex:s ex:p [ ex:q ex:v ] .\n" +
+		"[ ex:a ex:b ] .\n" +
+		"[ ex:c ex:d ] ex:e ex:f .\n" +
+		"[ ex:g [ ex:h ex:i ] ] .\n"
+	p: Parser
+	parser_init(&p, transmute([]byte)src)
+	defer parser_destroy(&p)
+
+	b := proc(n: string) -> rdf.Term { return rdf.Blank_Node(n) }
+	next_expect(t, &p, b("b0"), ex("q"), ex("v"))
+	next_expect(t, &p, ex("s"), ex("p"), b("b0"))
+	next_expect(t, &p, b("b1"), ex("a"), ex("b"))
+	next_expect(t, &p, b("b2"), ex("c"), ex("d"))
+	next_expect(t, &p, b("b2"), ex("e"), ex("f"))
+	next_expect(t, &p, b("b4"), ex("h"), ex("i"))
+	next_expect(t, &p, b("b3"), ex("g"), b("b4"))
+	expect_end(t, &p)
+}
+
+@(test)
+test_collections :: proc(t: ^testing.T) {
+	src := EX_PRE + "ex:s ex:p ( ex:a ex:b ) .\nex:s ex:q () .\n() ex:r ex:o .\n"
+	p: Parser
+	parser_init(&p, transmute([]byte)src)
+	defer parser_destroy(&p)
+
+	b := proc(n: string) -> rdf.Term { return rdf.Blank_Node(n) }
+	next_expect(t, &p, b("b0"), rdf.RDF_FIRST, ex("a"))
+	next_expect(t, &p, b("b0"), rdf.RDF_REST, b("b1"))
+	next_expect(t, &p, b("b1"), rdf.RDF_FIRST, ex("b"))
+	next_expect(t, &p, b("b1"), rdf.RDF_REST, rdf.RDF_NIL)
+	next_expect(t, &p, ex("s"), ex("p"), b("b0"))
+	next_expect(t, &p, ex("s"), ex("q"), rdf.RDF_NIL)
+	next_expect(t, &p, rdf.RDF_NIL, ex("r"), ex("o"))
+	expect_end(t, &p)
+}
+
+@(test)
+test_nested_collection :: proc(t: ^testing.T) {
+	src := EX_PRE + "ex:s ex:p ( 1 ( 2 ) ) .\n"
+	p: Parser
+	parser_init(&p, transmute([]byte)src)
+	defer parser_destroy(&p)
+
+	b := proc(n: string) -> rdf.Term { return rdf.Blank_Node(n) }
+	one := rdf.literal_typed("1", rdf.XSD_INTEGER)
+	two := rdf.literal_typed("2", rdf.XSD_INTEGER)
+	next_expect(t, &p, b("b0"), rdf.RDF_FIRST, one)
+	// The inner collection's chain (cell b1) is emitted while it is
+	// parsed as the second element, before the outer rest-link (b2).
+	next_expect(t, &p, b("b1"), rdf.RDF_FIRST, two)
+	next_expect(t, &p, b("b1"), rdf.RDF_REST, rdf.RDF_NIL)
+	next_expect(t, &p, b("b0"), rdf.RDF_REST, b("b2"))
+	next_expect(t, &p, b("b2"), rdf.RDF_FIRST, b("b1"))
+	next_expect(t, &p, b("b2"), rdf.RDF_REST, rdf.RDF_NIL)
+	next_expect(t, &p, ex("s"), ex("p"), b("b0"))
+	expect_end(t, &p)
+}
+
+@(test)
+test_deep_nesting_bounded :: proc(t: ^testing.T) {
+	depth := 200
+	b: strings.Builder
+	strings.builder_init(&b)
+	defer strings.builder_destroy(&b)
+	strings.write_string(&b, EX_PRE)
+	strings.write_string(&b, "ex:s ex:p ")
+	for _ in 0 ..< depth {
+		strings.write_string(&b, "[ ex:q ")
+	}
+	strings.write_string(&b, "ex:o")
+	for _ in 0 ..< depth {
+		strings.write_string(&b, " ]")
+	}
+	strings.write_string(&b, " .")
+
+	p: Parser
+	parser_init(&p, transmute([]byte)strings.to_string(b))
+	defer parser_destroy(&p)
+	for {
+		_, ok := parser_next(&p)
+		if !ok {
+			break
+		}
+	}
+	testing.expect_value(t, p.err.kind, Error_Kind.Nesting_Too_Deep)
+}
+
+@(test)
 test_parser_errors :: proc(t: ^testing.T) {
 	expect_error(t, `ex:s ex:p ex:o .`, .Undefined_Prefix)
 	expect_error(t, `<http://e/s> <http://e/p> <rel> .`, .Relative_IRI)
@@ -259,6 +418,53 @@ test_error_positions :: proc(t: ^testing.T) {
 	testing.expect_value(t, p.err.kind, Error_Kind.Undefined_Prefix)
 	testing.expect_value(t, p.err.line, 2)
 	testing.expect_value(t, p.err.column, 6)
+}
+
+@(test)
+test_steady_state_allocations :: proc(t: ^testing.T) {
+	original := context.allocator
+	b: strings.Builder
+	strings.builder_init(&b, original)
+	defer strings.builder_destroy(&b)
+	strings.write_string(&b, EX_PRE)
+	for _ in 0 ..< 200 {
+		strings.write_string(&b, "ex:s ex:p ex:o1 , ex:o2 ; ex:q ex:o3 .\n")
+	}
+	src := strings.to_string(b)
+
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, original)
+	defer mem.tracking_allocator_destroy(&track)
+	allocator := mem.tracking_allocator(&track)
+
+	p: Parser
+	parser_init(&p, transmute([]byte)src, "", allocator)
+	defer parser_destroy(&p)
+
+	// Drain the first statement (3 triples) plus one triple of the
+	// second: queue and intern table are now at their high-water mark.
+	for _ in 0 ..< 4 {
+		_, ok := parser_next(&p)
+		testing.expect(t, ok)
+	}
+	high_water := track.total_allocation_count
+	count := 4
+	for {
+		_, ok := parser_next(&p)
+		if !ok {
+			break
+		}
+		count += 1
+	}
+	testing.expect_value(t, p.err.kind, Error_Kind.None)
+	testing.expect_value(t, count, 600)
+	testing.expectf(
+		t,
+		track.total_allocation_count == high_water,
+		"steady-state parsing allocated: %v -> %v",
+		high_water,
+		track.total_allocation_count,
+	)
 }
 
 @(test)

@@ -34,6 +34,9 @@ Error_Kind :: enum {
 	Expected_Prefix_Name,
 	Expected_IRI,
 	Undefined_Prefix,
+	Unclosed_Property_List,
+	Unclosed_Collection,
+	Nesting_Too_Deep,
 }
 
 // Error is a grammar violation with its position. The zero value (kind
@@ -103,6 +106,12 @@ error_message :: proc(kind: Error_Kind) -> string {
 		return "expected an IRI reference (prefixID/base)"
 	case .Undefined_Prefix:
 		return "prefixed name uses an undeclared prefix (PrefixedName)"
+	case .Unclosed_Property_List:
+		return "blank node property list not closed with ']' (blankNodePropertyList)"
+	case .Unclosed_Collection:
+		return "collection not closed with ')' (collection)"
+	case .Nesting_Too_Deep:
+		return "nesting exceeds the parser's depth bound (blankNodePropertyList/collection)"
 	}
 	return "unknown error"
 }

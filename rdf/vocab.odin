@@ -27,3 +27,10 @@ RDF_FIRST :: IRI(RDF_NS + "first")
 RDF_REST :: IRI(RDF_NS + "rest")
 // RDF_REIFIES relates a reifier to a triple term (RDF 1.2).
 RDF_REIFIES :: IRI(RDF_NS + "reifies")
+
+// Datatypes of the Turtle abbreviated literal forms (numeric and
+// boolean literals are captured lexically with these datatypes).
+XSD_INTEGER :: IRI(XSD_NS + "integer")
+XSD_DECIMAL :: IRI(XSD_NS + "decimal")
+XSD_DOUBLE :: IRI(XSD_NS + "double")
+XSD_BOOLEAN :: IRI(XSD_NS + "boolean")

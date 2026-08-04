@@ -38,8 +38,13 @@ Parser :: struct {
 	lookahead:     Token,
 	has_lookahead: bool,
 	anon_counter:  int,
+	depth:         int, // current [ ] / ( ) / << >> nesting
 	err:           Error,
 }
+
+// MAX_NESTING_DEPTH bounds recursive structures so pathological input
+// produces a structured error instead of a stack overflow.
+MAX_NESTING_DEPTH :: 128
 
 init :: proc(p: ^Parser, source: []byte, base: string, allocator: runtime.Allocator) {
 	p^ = {}
@@ -209,12 +214,37 @@ parse_base_directive :: proc(p: ^Parser, at_form: bool) -> bool {
 }
 
 // parse_triples parses one triples statement whose first token has been
-// consumed, appending its fan-out to the queue.
+// consumed, appending its fan-out to the queue in document order (a
+// nested structure's triples precede the triple that references it).
 @(private)
 parse_triples :: proc(p: ^Parser, first: Token) -> bool {
-	subject, sok := parse_subject(p, first)
+	p.depth = 0
+	subject: rdf.Term
+	sok: bool
+	pol_optional := false
+	#partial switch first.kind {
+	case .L_Bracket:
+		has_props: bool
+		subject, has_props, sok = parse_bnode_property_list(p, first)
+		// 'triples ::= … | blankNodePropertyList predicateObjectList?':
+		// only a non-empty property list may stand alone; a bare ANON
+		// subject still needs predicates.
+		pol_optional = has_props
+	case .L_Paren:
+		subject, sok = parse_collection(p, first)
+	case:
+		subject, sok = parse_subject(p, first)
+	}
 	if !sok {
 		return false
+	}
+	if pol_optional {
+		if peeked, has := peek_token(p); has && peeked.kind == .Dot {
+			_, _ = next_token(p)
+			return true
+		} else if !has && scanner_failed(p) {
+			return false
+		}
 	}
 	if !parse_predicate_object_list(p, subject) {
 		return false
@@ -236,19 +266,162 @@ parse_subject :: proc(p: ^Parser, tok: Token) -> (term: rdf.Term, ok: bool) {
 	return nil, false
 }
 
-// parse_predicate_object_list parses 'verb object' — extended with ';'
-// and ',' lists in RDF-T-0015.
+// parse_predicate_object_list parses
+// 'verb objectList (';' (verb objectList)?)*' — semicolon runs and a
+// trailing semicolon are tolerated per the grammar.
 @(private)
 parse_predicate_object_list :: proc(p: ^Parser, subject: rdf.Term) -> bool {
-	verb, vok := parse_verb(p)
-	if !vok {
+	for {
+		verb, vok := parse_verb(p)
+		if !vok {
+			return false
+		}
+		if !parse_object_list(p, subject, verb) {
+			return false
+		}
+		saw_semicolon := false
+		for {
+			peeked, has := peek_token(p)
+			if !has {
+				if scanner_failed(p) {
+					return false
+				}
+				return true // EOF; the caller's Dot check reports it
+			}
+			if peeked.kind != .Semicolon {
+				break
+			}
+			_, _ = next_token(p)
+			saw_semicolon = true
+		}
+		if !saw_semicolon {
+			return true
+		}
+		// After ';' only a verb continues the list; anything else (the
+		// '.'/']' terminator) means the semicolon was trailing.
+		peeked, has := peek_token(p)
+		if !has {
+			return !scanner_failed(p)
+		}
+		#partial switch peeked.kind {
+		case .A, .IRI_Ref, .PName:
+		// next verb
+		case:
+			return true
+		}
+	}
+}
+
+// parse_object_list parses 'object (',' object)*'.
+@(private)
+parse_object_list :: proc(p: ^Parser, subject: rdf.Term, verb: rdf.Term) -> bool {
+	for {
+		object, ook := parse_object(p)
+		if !ook {
+			return false
+		}
+		append(&p.queue, rdf.Triple{subject = subject, predicate = verb, object = object})
+		peeked, has := peek_token(p)
+		if !has {
+			return !scanner_failed(p) // EOF; the Dot check reports it
+		}
+		if peeked.kind != .Comma {
+			return true
+		}
+		_, _ = next_token(p)
+	}
+}
+
+// parse_bnode_property_list parses '[ predicateObjectList? ]' from its
+// consumed '[' token: a bare '[ ]' is ANON (a fresh node, no triples);
+// otherwise the fresh node's triples are queued before the triple that
+// will reference the node.
+@(private)
+parse_bnode_property_list :: proc(p: ^Parser, open: Token) -> (term: rdf.Term, has_props: bool, ok: bool) {
+	if !enter_nested(p, open) {
+		return nil, false, false
+	}
+	defer p.depth -= 1
+
+	peeked, has := peek_token(p)
+	if !has {
+		if !scanner_failed(p) {
+			fail_here(p, .Unclosed_Property_List)
+		}
+		return nil, false, false
+	}
+	node := fresh_blank_node(p)
+	if peeked.kind == .R_Bracket {
+		_, _ = next_token(p)
+		return node, false, true
+	}
+	if !parse_predicate_object_list(p, node) {
+		return nil, false, false
+	}
+	close, cok := next_token(p)
+	if !cok {
+		if !scanner_failed(p) {
+			fail_here(p, .Unclosed_Property_List)
+		}
+		return nil, false, false
+	}
+	if close.kind != .R_Bracket {
+		fail_at(p, .Unclosed_Property_List, close)
+		return nil, false, false
+	}
+	return node, true, true
+}
+
+// parse_collection parses '( object* )' from its consumed '(' token
+// into an rdf:first/rdf:rest chain; '()' is the term rdf:nil with no
+// triples.
+@(private)
+parse_collection :: proc(p: ^Parser, open: Token) -> (term: rdf.Term, ok: bool) {
+	if !enter_nested(p, open) {
+		return nil, false
+	}
+	defer p.depth -= 1
+
+	head: rdf.Term
+	tail: rdf.Term // the chain's last cell, nil until the first element
+	for {
+		peeked, has := peek_token(p)
+		if !has {
+			if !scanner_failed(p) {
+				fail_here(p, .Unclosed_Collection)
+			}
+			return nil, false
+		}
+		if peeked.kind == .R_Paren {
+			_, _ = next_token(p)
+			if tail == nil {
+				return rdf.RDF_NIL, true
+			}
+			append(&p.queue, rdf.Triple{subject = tail, predicate = rdf.RDF_REST, object = rdf.RDF_NIL})
+			return head, true
+		}
+		element, eok := parse_object(p)
+		if !eok {
+			return nil, false
+		}
+		cell := fresh_blank_node(p)
+		if tail == nil {
+			head = cell
+		} else {
+			append(&p.queue, rdf.Triple{subject = tail, predicate = rdf.RDF_REST, object = cell})
+		}
+		append(&p.queue, rdf.Triple{subject = cell, predicate = rdf.RDF_FIRST, object = element})
+		tail = cell
+	}
+}
+
+@(private)
+enter_nested :: proc(p: ^Parser, tok: Token) -> bool {
+	p.depth += 1
+	if p.depth > MAX_NESTING_DEPTH {
+		fail_at(p, .Nesting_Too_Deep, tok)
 		return false
 	}
-	object, ook := parse_object(p)
-	if !ook {
-		return false
-	}
-	append(&p.queue, rdf.Triple{subject = subject, predicate = verb, object = object})
 	return true
 }
 
@@ -291,6 +464,19 @@ parse_object :: proc(p: ^Parser) -> (term: rdf.Term, ok: bool) {
 		return doc_blank_node(p, tok), true
 	case .String_Literal:
 		return parse_literal(p, tok)
+	case .Integer:
+		return rdf.literal_typed(tok.text, rdf.XSD_INTEGER), true
+	case .Decimal:
+		return rdf.literal_typed(tok.text, rdf.XSD_DECIMAL), true
+	case .Double:
+		return rdf.literal_typed(tok.text, rdf.XSD_DOUBLE), true
+	case .Boolean:
+		return rdf.literal_typed(tok.text, rdf.XSD_BOOLEAN), true
+	case .L_Bracket:
+		term_, _, ok_ := parse_bnode_property_list(p, tok)
+		return term_, ok_
+	case .L_Paren:
+		return parse_collection(p, tok)
 	}
 	fail_at(p, .Expected_Object, tok)
 	return nil, false
