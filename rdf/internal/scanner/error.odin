@@ -14,6 +14,11 @@ Error_Kind :: enum {
 	Invalid_Blank_Node_Label,
 	Invalid_Lang_Tag,
 	Invalid_Escape,
+	// Scanner-level, Turtle-family formats (set by rdf/internal/ttl).
+	Unterminated_Long_String,
+	Invalid_Number,
+	Unknown_Keyword,
+	Invalid_Percent_Encoding,
 	// Parser-level (set by rdf/triples and rdf/quads).
 	Expected_Subject,
 	Expected_Predicate,
@@ -59,7 +64,15 @@ error_message :: proc(kind: Error_Kind) -> string {
 	case .Invalid_Lang_Tag:
 		return "malformed language tag (LANGTAG)"
 	case .Invalid_Escape:
-		return "invalid escape sequence (ECHAR/UCHAR)"
+		return "invalid escape sequence (ECHAR/UCHAR/PN_LOCAL_ESC)"
+	case .Unterminated_Long_String:
+		return "unterminated long string literal (STRING_LITERAL_LONG_QUOTE)"
+	case .Invalid_Number:
+		return "malformed numeric literal (INTEGER/DECIMAL/DOUBLE)"
+	case .Unknown_Keyword:
+		return "unknown keyword; expected 'a', 'true', 'false', PREFIX, BASE, or GRAPH (turtleDoc)"
+	case .Invalid_Percent_Encoding:
+		return "malformed percent encoding in local name (PERCENT)"
 	case .Expected_Subject:
 		return "expected IRI or blank node as subject (subject)"
 	case .Expected_Predicate:

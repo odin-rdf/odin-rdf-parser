@@ -286,7 +286,9 @@ scan_hex :: proc(s: ^Scanner, n: int, esc_offset: int) -> bool {
 	return true
 }
 
-@(private)
+// is_alpha, is_alnum, and is_hex_digit are the character-class primitives
+// shared with the Turtle-family scanner (rdf/internal/ttl) — shared as
+// functions, not as scanner state (RDF-I-0003 design decision).
 is_alpha :: proc(c: byte) -> bool {
 	switch c {
 	case 'a' ..= 'z', 'A' ..= 'Z':
@@ -295,7 +297,6 @@ is_alpha :: proc(c: byte) -> bool {
 	return false
 }
 
-@(private)
 is_alnum :: proc(c: byte) -> bool {
 	switch c {
 	case 'a' ..= 'z', 'A' ..= 'Z', '0' ..= '9':
@@ -304,7 +305,6 @@ is_alnum :: proc(c: byte) -> bool {
 	return false
 }
 
-@(private)
 is_hex_digit :: proc(c: byte) -> bool {
 	switch c {
 	case '0' ..= '9', 'a' ..= 'f', 'A' ..= 'F':
