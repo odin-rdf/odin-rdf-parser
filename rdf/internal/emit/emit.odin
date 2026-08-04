@@ -69,7 +69,8 @@ write_graph_label :: proc(w: io.Writer, g: rdf.Graph_Label) -> io.Error {
 	return nil
 }
 
-@(private)
+// write_iri and write_escaped are shared with the Turtle-family
+// emitters (rdf/internal/ttl), which add prefix abbreviation on top.
 write_iri :: proc(w: io.Writer, iri: rdf.IRI) -> io.Error {
 	io.write_byte(w, '<') or_return
 	// IRIREF forbids control characters, space, and <>"{}|^`\ — a valid
@@ -100,7 +101,6 @@ write_iri :: proc(w: io.Writer, iri: rdf.IRI) -> io.Error {
 // write_escaped writes a literal's lexical form with the minimal
 // mandatory escaping: named ECHARs for the common control characters and
 // the delimiter/backslash, \u00XX for the remaining control characters.
-@(private)
 write_escaped :: proc(w: io.Writer, s: string) -> io.Error {
 	start := 0
 	for i := 0; i < len(s); i += 1 {
