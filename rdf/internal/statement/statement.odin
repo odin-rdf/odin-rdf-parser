@@ -97,6 +97,31 @@ parse_object :: proc(p: ^Parser) -> (term: rdf.Term, ok: bool) {
 	return parse_object_term(p, tok)
 }
 
+// parse_optional_graph_label reads the optional graph label between the
+// object and the terminating dot (N-Quads). A directly following '.'
+// yields nil — the default graph.
+parse_optional_graph_label :: proc(p: ^Parser) -> (graph: rdf.Graph_Label, ok: bool) {
+	tok, has := peek_token(p)
+	if !has {
+		if scanner_failed(p) {
+			return nil, false
+		}
+		return nil, true // EOF; the Dot check reports it
+	}
+	#partial switch tok.kind {
+	case .Dot:
+		return nil, true
+	case .IRI_Ref:
+		_, _ = next_token(p)
+		return rdf.IRI(maybe_unescape(p, tok)), true
+	case .Blank_Node_Label:
+		_, _ = next_token(p)
+		return rdf.Blank_Node(tok.text), true
+	}
+	fail_at(p, .Invalid_Graph_Label, tok)
+	return nil, false
+}
+
 expect_dot :: proc(p: ^Parser) -> bool {
 	tok, tok_ok := next_token(p)
 	if !tok_ok {
