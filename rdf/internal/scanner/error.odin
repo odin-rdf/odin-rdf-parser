@@ -19,6 +19,7 @@ Error_Kind :: enum {
 	Expected_Predicate,
 	Expected_Object,
 	Expected_Dot,
+	Expected_Datatype,
 	Invalid_Graph_Label,
 	Unclosed_Triple_Term,
 	Invalid_Direction,
@@ -65,6 +66,8 @@ error_message :: proc(kind: Error_Kind) -> string {
 		return "expected IRI, blank node, literal, or triple term as object (object)"
 	case .Expected_Dot:
 		return "expected '.' after statement (triple)"
+	case .Expected_Datatype:
+		return "expected IRI after '^^' (literal)"
 	case .Invalid_Graph_Label:
 		return "expected IRI or blank node as graph label (graphLabel)"
 	case .Unclosed_Triple_Term:
