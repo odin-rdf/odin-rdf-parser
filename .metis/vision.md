@@ -4,7 +4,7 @@ level: vision
 title: "odin-rdf-parser"
 short_code: "RDF-V-0001"
 created_at: 2026-08-04T09:24:04.787158+00:00
-updated_at: 2026-08-04T09:28:54.622787+00:00
+updated_at: 2026-08-06T12:00:00.000000+00:00
 archived: false
 
 tags:
@@ -12,7 +12,7 @@ tags:
   - "#phase/published"
 
 
-exit_criteria_met: false
+exit_criteria_met: true
 initiative_id: NULL
 ---
 
@@ -35,7 +35,13 @@ The library is deliberately low-level: it supplies the primitives on which highe
 
 ## Current State
 
-The core scope is delivered (2026-08-04): the data model (RDF-I-0001) and parsers/emitters for all four formats (RDF-I-0002, RDF-I-0003) are complete, passing all 1045 tests across the 10 vendored W3C suites, including RDF-star, with steady-state-zero-allocation parsing verified by benchmarks. The finish-up backlog is done: the large-document streaming contract is decided and documented (RDF-T-0024: whole-document buffer, mmap for large files), the public API carries full contract documentation (RDF-T-0023), and the repo has a README with compile-verified examples (RDF-T-0022). The sole open success criterion is downstream validation, which awaits the first consumer project (the planned odin-rdf-sparql).
+**Every success criterion is met (2026-08-06).** The data model (RDF-I-0001) and parsers/emitters for all four formats (RDF-I-0002, RDF-I-0003) are complete, passing all 1045 tests across the 10 vendored W3C suites, including RDF-star, with steady-state-zero-allocation parsing verified by benchmarks. The finish-up backlog is done: the large-document streaming contract is decided and documented (RDF-T-0024: whole-document buffer, mmap for large files), the public API carries full contract documentation (RDF-T-0023), and the repo has a README with compile-verified examples (RDF-T-0022).
+
+The last criterion — downstream validation — closed twice over: **odin-rdf-store** ingests all four formats through these parsers under the clone/intern discipline of RDF-A-0001, and **odin-rdf-sparql** emits through these emitters and consumes this data model as its term vocabulary. The library is no longer being validated by its own tests alone.
+
+Since then: CI runs the four suites plus a `-vet -strict-style` pass on Linux, macOS, and Windows; the first Windows run found that the vendored W3C fixtures were being corrupted by line-ending translation on checkout (six eval tests, literals whose value is a raw line feed), fixed by `.gitattributes` — a portability bug that had been latent for as long as the suite ran on one platform. Tagged **v0.1.0**.
+
+Open work is elective rather than remedial. RDF/XML and JSON-LD remain out of scope by decision; the one consequence downstream is that ten `sparql11-subquery` entries in odin-rdf-sparql's corpus can never run, accepted and documented there as a ceiling. The family's open **term-identity** question — whether language tags fold case and IRIs normalize — would land partly here if the answer puts normalization in the data model, and would change this package's documented "stored as given; no normalization" contract.
 
 ## Future State
 
