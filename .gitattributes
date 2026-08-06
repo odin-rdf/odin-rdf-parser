@@ -1,0 +1,16 @@
+# The vendored W3C suites are conformance fixtures whose exact bytes are the
+# test. Several hold literals whose value is a raw line feed --
+# rdf11-turtle/literal_with_LINE_FEED.ttl is `'''<LF>'''`, and the subm-15/16
+# cases embed newlines in """ literals. A checkout that translates those to
+# CRLF changes the literal's value, so the parse is no longer isomorphic to
+# the expected N-Triples: six eval tests fail on Windows without this.
+tests/w3c/** -text
+
+# Benchmark corpora are measured by bytes parsed per second; line-ending
+# translation would silently change both the input and the throughput.
+bench/corpus/** -text
+
+# Odin sources are ordinary text wherever they sit, including the suite
+# harness and the corpus loader inside the directories above. Last matching
+# pattern wins, so this re-exempts them.
+*.odin text=auto
