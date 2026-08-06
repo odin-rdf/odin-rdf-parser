@@ -1,0 +1,52 @@
+# Runs what the README documents as the way to test this project, plus a
+# vet/strict-style pass. This repo has no C dependencies, so it builds on
+# both Linux and macOS -- the sibling projects that link LMDB cannot.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same branch supersedes the run already in flight.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      # One OS failing should not hide the other's result.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release: latest
+
+      - name: Odin version
+        run: odin version
+
+      - name: Vet
+        run: odin check rdf -no-entry-point -vet -strict-style
+
+      # ODIN_TEST_FAIL_ON_BAD_MEMORY promotes leaks and bad frees from
+      # warnings, which a passing build hides, to failures -- the same
+      # discipline the sibling projects' Makefiles apply.
+      - name: Unit tests (data model and all four formats)
+        run: odin test rdf -all-packages -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true
+
+      - name: W3C conformance suites
+        run: odin test tests/w3c/harness -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true
+
+      - name: Allocation guards
+        run: odin test tests/guards -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true
+
+      - name: README examples
+        run: odin test tests/readme -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true
