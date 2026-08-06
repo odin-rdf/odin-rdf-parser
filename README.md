@@ -1,5 +1,7 @@
 # odin-rdf-parser
 
+[![CI](https://github.com/odin-rdf/odin-rdf-parser/actions/workflows/ci.yml/badge.svg)](https://github.com/odin-rdf/odin-rdf-parser/actions/workflows/ci.yml)
+
 Streaming parsers and emitters for the core RDF serialization formats —
 N-Triples, N-Quads, Turtle, and TriG — written in Odin with no external
 dependencies. Implements the W3C RDF 1.2 grammars, including RDF-star
