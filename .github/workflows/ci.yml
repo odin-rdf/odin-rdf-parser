@@ -6,7 +6,17 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '.metis/**'
+      - 'docs/**'
+      - 'README.md'
+      - 'LICENSE'
   pull_request:
+    paths-ignore:
+      - '.metis/**'
+      - 'docs/**'
+      - 'README.md'
+      - 'LICENSE'
   workflow_dispatch:
 
 # A new push to the same branch supersedes the run already in flight.
